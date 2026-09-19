@@ -18,11 +18,11 @@ if (!TARGET_URL) {
 const browser = await chromium.launch({
   headless: HEADLESS,
   // Uses the installed Google Chrome instead of Playwright's bundled Chromium.
-  channel: "chrome"
+  channel: "chrome",
 });
 
 const context = await browser.newContext({
-  viewport: { width: 1440, height: 900 }
+  viewport: { width: 1440, height: 900 },
 });
 
 const page = await context.newPage();
@@ -31,7 +31,7 @@ try {
   console.log(`\\n[1] Opening: ${TARGET_URL}`);
   await page.goto(TARGET_URL, {
     waitUntil: "domcontentloaded",
-    timeout: 60_000
+    timeout: 60_000,
   });
 
   await page.waitForLoadState("networkidle").catch(() => {});
@@ -49,12 +49,12 @@ try {
       text: clean(el.innerText || el.textContent),
       ariaLabel: el.getAttribute("aria-label"),
       type: el.getAttribute("type"),
-      disabled: el.disabled
+      disabled: el.disabled,
     }));
 
-    const inputs = [...document.querySelectorAll(
-      "input, textarea, select"
-    )].map((el, i) => ({
+    const inputs = [
+      ...document.querySelectorAll("input, textarea, select"),
+    ].map((el, i) => ({
       index: i,
       tag: el.tagName.toLowerCase(),
       type: el.getAttribute("type"),
@@ -62,13 +62,13 @@ try {
       id: el.id,
       placeholder: el.getAttribute("placeholder"),
       ariaLabel: el.getAttribute("aria-label"),
-      value: el.value
+      value: el.value,
     }));
 
     const links = [...document.querySelectorAll("a")].map((el, i) => ({
       index: i,
       text: clean(el.innerText || el.textContent),
-      href: el.href
+      href: el.href,
     }));
 
     return {
@@ -76,14 +76,14 @@ try {
       title: document.title,
       buttons,
       inputs,
-      links
+      links,
     };
   });
 
   fs.mkdirSync("artifacts", { recursive: true });
   fs.writeFileSync(
     "artifacts/page-info.json",
-    JSON.stringify(pageInfo, null, 2)
+    JSON.stringify(pageInfo, null, 2),
   );
 
   console.log(`Buttons: ${pageInfo.buttons.length}`);
@@ -94,7 +94,7 @@ try {
   console.log("\\n[4] BUTTONS");
   pageInfo.buttons.forEach((b) => {
     console.log(
-      `[${b.index}] "${b.text}" | aria="${b.ariaLabel || ""}" | disabled=${b.disabled}`
+      `[${b.index}] "${b.text}" | aria="${b.ariaLabel || ""}" | disabled=${b.disabled}`,
     );
   });
 
@@ -102,8 +102,8 @@ try {
   pageInfo.inputs.forEach((input) => {
     console.log(
       `[${input.index}] ${input.tag} type="${input.type || ""}" ` +
-      `name="${input.name || ""}" id="${input.id || ""}" ` +
-      `placeholder="${input.placeholder || ""}"`
+        `name="${input.name || ""}" id="${input.id || ""}" ` +
+        `placeholder="${input.placeholder || ""}"`,
     );
   });
 
@@ -138,7 +138,7 @@ try {
   fs.mkdirSync("artifacts", { recursive: true });
   await page.screenshot({
     path: SCREENSHOT_PATH,
-    fullPage: true
+    fullPage: true,
   });
 
   console.log("\\nDONE.");
@@ -150,10 +150,12 @@ try {
   console.error(error);
 
   fs.mkdirSync("artifacts", { recursive: true });
-  await page.screenshot({
-    path: "artifacts/error.png",
-    fullPage: true
-  }).catch(() => {});
+  await page
+    .screenshot({
+      path: "artifacts/error.png",
+      fullPage: true,
+    })
+    .catch(() => {});
 
   process.exitCode = 1;
 } finally {

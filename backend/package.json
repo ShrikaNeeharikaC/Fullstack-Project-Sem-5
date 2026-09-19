@@ -4,11 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node src/script.js",
+    "start": "node src/server.js",
     "codegen": "playwright codegen"
   },
   "dependencies": {
+    "cors": "^2.8.6",
     "dotenv": "^16.6.1",
+    "express": "^5.2.1",
     "playwright": "^1.54.2"
   }
 }
