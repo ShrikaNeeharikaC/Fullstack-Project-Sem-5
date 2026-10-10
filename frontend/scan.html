@@ -64,7 +64,7 @@
       </form>
       <p class="scan-error" id="scan-error"></p>
       <p class="scan-microcopy">
-        Takes about 30–60 seconds. No installation required.
+        Takes a few minutes. The agent will ask you before risky actions or filling forms.
       </p>
     </section>
 
@@ -84,6 +84,15 @@
       <div class="section-heading">
         <h2>Analysis Results</h2>
         <p id="result-url-subtitle"></p>
+      </div>
+      <!-- Live crawl: status + stop, agent questions, progress log -->
+      <div id="crawl-live">
+        <div class="crawl-status-row">
+          <span id="crawl-status">Starting…</span>
+          <button type="button" id="crawl-stop" class="btn btn-dark btn-sm">Stop scan</button>
+        </div>
+        <div id="crawl-question" hidden></div>
+        <ol id="crawl-log"></ol>
       </div>
       <div id="results-content"></div>
       <details

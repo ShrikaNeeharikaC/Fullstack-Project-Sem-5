@@ -1,43 +1,43 @@
 import { chromium } from "playwright";
 import { takeScreenshot } from "./screenshot.js";
 import { extractPageInfo } from "./pageAnalyzer.js";
-import { analyzePage } from "./llm/openrouter.js";
+import { analyzePage } from "./llm/gemini.js";
 import fs from "fs";
 
 export async function analyzePageWorkflow(url) {
-  const browser = await chromium.launch({ channel: "chrome" });
+  const browser = await chromium.launch({ channel: "chrome" });//this will launch the browser in headless mode by default. You can set headless: false if you want to see the browser UI.
   try {
     const context = await browser.newContext({
       viewport: { width: 1440, height: 900 },
     });
     const page = await context.newPage();
 
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });//goes to the requested url
     await page.waitForTimeout(2000);
 
-    const { screenshotBuffer, screenshotPath } = await takeScreenshot(page);
-    const pageInfo = await extractPageInfo(page);
+    const { screenshotBuffer, screenshotPath } = await takeScreenshot(page);//takes the ss
+    const pageInfo = await extractPageInfo(page);//reads the page info
 
     fs.mkdirSync("artifacts", { recursive: true });
     fs.writeFileSync(
       "artifacts/page-info.json",
       JSON.stringify(pageInfo, null, 2),
-    );
+    );//saves the results to a file 
 
-    const geminiResult = await analyzePage(screenshotBuffer, pageInfo);
+    const llmResult = await analyzePage(screenshotBuffer, pageInfo);//send the ss and page info to the ai
 
     fs.writeFileSync(
       "artifacts/analysis.json",
-      JSON.stringify(geminiResult.parsed || geminiResult.output_text, null, 2),
-    );
+      JSON.stringify(llmResult.parsed || llmResult.output_text, null, 2),
+    );//saves the ai's answer
 
-    if (!geminiResult.parsed) {
+    if (!llmResult.parsed) {
       throw new Error(
-        "Failed to parse structured JSON from Gemini. Check artifacts/analysis.json for raw output.",
+        "Failed to parse structured JSON from the LLM. Check artifacts/analysis.json for raw output.",
       );
     }
 
-    return geminiResult.parsed;
+    return llmResult.parsed;
   } finally {
     await browser.close();
   }
