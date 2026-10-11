@@ -1,38 +1,58 @@
 // Scan page: recently-scanned list + scan submission -> live LangGraph crawl -> report
 
-const RECENT_SCANS = [
-  { url: "yourapp.com", timestamp: "2 hours ago", bugs: 12, status: "high" },
-  { url: "shop.demoapp.io", timestamp: "Yesterday", bugs: 4, status: "low" },
-  {
-    url: "staging.acme.dev",
-    timestamp: "3 days ago",
-    bugs: 0,
-    status: "resolved",
-  },
-];
+// "Just now", "5 min ago", "2 hours ago", "Yesterday", "3 days ago", or a date.
+function relativeTime(iso) {
+  const then = new Date(iso);
+  const mins = Math.round((Date.now() - then) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  return then.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
 
-function renderRecentScans() {
+const dashboardLink = (url) => `dashboard.html?url=${encodeURIComponent(url)}`;
+
+// Real scans only: every URL scanned before (Scan page or dashboard Re-Scan),
+// most recent first, read from the backend's saved results.
+async function renderRecentScans() {
   const grid = document.getElementById("recent-grid");
   if (!grid) return;
 
-  if (RECENT_SCANS.length === 0) {
+  let scans;
+  try {
+    const res = await apiFetch(`/api/scans`);
+    scans = (await res.json()).scans || [];
+  } catch (err) {
+    grid.innerHTML = `<div class="recent-empty">Can't reach the BugOps backend, so past scans can't be shown. Start it with <code>npm start</code> in the backend folder.</div>`;
+    return;
+  }
+
+  if (scans.length === 0) {
     grid.innerHTML = `<div class="recent-empty">No apps scanned yet. Run your first scan above to see results here.</div>`;
     return;
   }
 
-  grid.innerHTML = RECENT_SCANS.map(
-    (scan) => `
-    <a class="recent-card" href="dashboard.html?url=${encodeURIComponent(scan.url)}">
+  grid.innerHTML = scans
+    .slice(0, 6)
+    .map((scan) => {
+      const b = scan.bugs;
+      const worst = b.high ? "high" : b.medium ? "medium" : b.low ? "low" : "resolved";
+      return `
+    <a class="recent-card" href="${dashboardLink(scan.url)}">
       <div class="status-dot-row">
-        <span class="status-dot ${scan.status}"></span>
-        <span class="timestamp">Last scanned ${scan.timestamp}</span>
+        <span class="status-dot ${worst}"></span>
+        <span class="timestamp">Last scanned ${esc(relativeTime(scan.lastScanned))}</span>
       </div>
-      <span class="url">${scan.url}</span>
-      <span class="bug-count">${scan.bugs} bug${scan.bugs === 1 ? "" : "s"} found</span>
+      <span class="url">${esc(scan.url.replace(/^https?:\/\//i, "").replace(/#\/?$/, "").replace(/\/$/, ""))}</span>
+      <span class="bug-count">${b.total} bug${b.total === 1 ? "" : "s"} found</span>
       <span class="view-results">View Results &nbsp;&#8594;</span>
-    </a>
-  `,
-  ).join("");
+    </a>`;
+    })
+    .join("");
 }
 
 function isLikelyUrl(value) {
@@ -42,7 +62,6 @@ function isLikelyUrl(value) {
   return /^(https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)+([\/?#].*)?$/i.test(trimmed);
 }
 
-const API_BASE = "http://localhost:3000";
 const POLL_MS = 1500;
 
 let activeScanId = null;
@@ -71,7 +90,7 @@ async function runScanSequence(url, button) {
 
   setScanButton(button, true);
   try {
-    const res = await fetch(`${API_BASE}/api/scan`, {
+    const res = await apiFetch(`/api/scan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url: fullUrl }),
@@ -112,7 +131,7 @@ async function pollScan(button) {
   const status = document.getElementById("crawl-status");
   let scan;
   try {
-    const res = await fetch(`${API_BASE}/api/scan/${activeScanId}`);
+    const res = await apiFetch(`/api/scan/${activeScanId}`);
     scan = await res.json();
   } catch (err) {
     status.textContent = "Lost connection to backend, retrying...";
@@ -137,6 +156,7 @@ async function pollScan(button) {
     status.textContent = "Scan complete";
     finishScan(button);
     renderReport(scan.report);
+    renderRecentScans();
     return;
   } else if (scan.status === "error") {
     status.textContent = `Scan failed: ${scan.error}`;
@@ -198,7 +218,7 @@ function renderQuestion(question) {
     btn.addEventListener("click", async () => {
       box.querySelectorAll("button").forEach((b) => (b.disabled = true));
       try {
-        await fetch(`${API_BASE}/api/scan/${activeScanId}/answer`, {
+        await apiFetch(`/api/scan/${activeScanId}/answer`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ answer: btn.dataset.answer }),
@@ -230,6 +250,7 @@ function renderReport(report) {
   const s = report.stats;
 
   let html = `
+    <p><a class="btn btn-dark btn-sm" href="${dashboardLink(report.startUrl)}">View in dashboard &#8594;</a></p>
     <p>Stopped because: <strong>${esc(STOP_REASONS[report.stopReason] || report.stopReason)}</strong></p>
     <div class="crawl-stats">
       <div><strong>${s.actions}</strong>actions</div>
@@ -363,6 +384,6 @@ document.addEventListener("DOMContentLoaded", () => {
     e.target.disabled = true;
     document.getElementById("crawl-status").textContent =
       "Stopping after the current action...";
-    await fetch(`${API_BASE}/api/scan/${activeScanId}/stop`, { method: "POST" }).catch(() => {});
+    await apiFetch(`/api/scan/${activeScanId}/stop`, { method: "POST" }).catch(() => {});
   });
 });

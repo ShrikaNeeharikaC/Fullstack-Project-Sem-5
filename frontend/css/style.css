@@ -175,6 +175,12 @@ h1, h2, h3, h4, p { margin: 0; }
   align-items: center;
   gap: 12px;
 }
+/* "Hi, name" shown instead of Login/SignUp when logged in (js/auth.js). */
+.nav-user {
+  font-weight: 600;
+  color: var(--purple-deep);
+  white-space: nowrap;
+}
 .nav-toggle {
   display: none;
   background: none;

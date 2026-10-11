@@ -67,12 +67,12 @@
       <!-- Hosted App Status Bar -->
       <div class="status-bar">
         <div class="status-bar-left">
-          <span class="app-url" id="tracked-url">yourapp.com</span>
+          <span class="app-url" id="tracked-url">Loading…</span>
           <button class="btn btn-cream btn-sm" id="rescan-btn">Re-Scan</button>
         </div>
         <div class="status-bar-right">
-          <span>Last scanned: <strong id="last-scanned-text">2 hours ago</strong></span>
-          <span class="status-line">Status: <span class="status-dot high" id="status-dot"></span></span>
+          <span>Last scanned: <strong id="last-scanned-text">…</strong></span>
+          <span class="status-line">Status: <span class="status-dot" id="status-dot"></span></span>
           <a href="scan.html" class="scan-another">Scan another URL</a>
         </div>
       </div>
@@ -200,6 +200,8 @@
   <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
   <span id="toast-text"></span>
 </div>
+
+<script src="js/auth.js" data-require-auth></script>
 
 <script src="js/main.js"></script>
 <script src="js/dashboard.js"></script>

@@ -12,6 +12,19 @@ export function isRiskyByKeyword(candidate) {
   return RISKY_PATTERN.test(haystack);
 }
 
+// Narrower than RISKY_PATTERN: actions that destroy data, end the session or
+// spend money. The test library never clicks these on its own ("submit" or
+// "send" are risky for the crawler but are exactly what form tests exercise).
+const DESTRUCTIVE_PATTERN =
+  /\b(delete|remove|destroy|trash|erase|clear\s*(all|completed)|reset|log\s*out|logout|sign\s*out|signout|unsubscribe|deactivate|close\s*account|purchase|buy(\s*now)?|checkout|check\s*out|pay|payment|place\s*order|subscribe|upgrade|transfer|withdraw|donate)\b/i;
+
+export function isDestructiveByKeyword(candidate) {
+  const haystack = [candidate.text, candidate.ariaLabel, candidate.title, candidate.href, candidate.name]
+    .filter(Boolean)
+    .join(" ");
+  return DESTRUCTIVE_PATTERN.test(haystack);
+}
+
 // Placeholder values for form fields. Obviously fake so nothing real is
 // ever submitted.
 export function testValueFor(field) {

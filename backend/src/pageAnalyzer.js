@@ -1,3 +1,5 @@
+import { relevantNetwork } from "./testlib/observer.js";
+
 export async function extractPageInfo(page) {
   const pageInfo = await page.evaluate(() => {
     const clean = (val) => (val || "").replace(/\s+/g, " ").trim();
@@ -72,4 +74,21 @@ export async function extractPageInfo(page) {
   }
 
   return { ...pageInfo, ariaSnapshot };
+}
+
+// page-info.json plus the observation layer's view of the page load:
+// network calls, console errors, cookies, storage and a DOM summary.
+//   observed = { network, console } from observer.since(mark)
+//   state    = captureState(page) taken after the load settled
+export async function extractFullPageInfo(page, { observed, state }) {
+  const base = await extractPageInfo(page);
+  return {
+    ...base,
+    network: relevantNetwork(observed.network),
+    console: observed.console,
+    cookies: state.cookies,
+    localStorage: state.localStorage,
+    sessionStorage: state.sessionStorage,
+    dom: state.dom,
+  };
 }

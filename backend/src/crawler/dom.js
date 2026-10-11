@@ -46,6 +46,11 @@ export async function extractCandidates(page) {
           text: clean(el.innerText || el.value || el.textContent),
           ariaLabel: el.getAttribute("aria-label"),
           href: tag === "a" ? el.href : null,
+          target: el.getAttribute("target"),
+          title: el.getAttribute("title"),
+          className: (typeof el.className === "string" ? el.className : "").slice(0, 60),
+          // Where it sits on the page: header/nav links matter more than footer ones.
+          landmark: el.closest("nav, header") ? "nav" : el.closest("footer") ? "footer" : null,
           // Submit buttons inside a <form> are handled as part of that form.
           inForm: !!el.closest("form") && el.type === "submit",
         });
