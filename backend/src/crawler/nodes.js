@@ -8,6 +8,7 @@ import { extractCandidates, fingerprint, locateClickable, locateField, normalize
 import { rankActions, evaluateAction } from "./llm.js";
 import { isRiskyByKeyword, testValueFor } from "./safety.js";
 import { activeMs, emit, getSession, openBrowser } from "./session.js";
+import { cacheKey, fingerprintInput, getOrComputeAnalysis } from "./scanCache.js";
 
 const limits = getCrawlLimits();
 
@@ -24,6 +25,38 @@ async function screenshot(session, name) {
 
 function canUseLlm(session) {
   return !session.llmDisabled && session.llmCalls < limits.maxLlmCalls;
+}
+
+async function analyzeCached(session, unit, input, analyze) {
+  if (!session.userId || !session.authSessionId) return analyze();
+  const fingerprintStartedAt = performance.now();
+  const inputHash = fingerprintInput(input);
+  session.cache.fingerprintMs += performance.now() - fingerprintStartedAt;
+  const key = cacheKey({
+    userId: session.userId,
+    sessionId: session.authSessionId,
+    url: session.scanUrl,
+    config: { limits, viewport: "1440x900", model: process.env.GEMINI_MODEL || "gemini-2.5-flash" },
+    unit,
+    input: inputHash,
+  });
+  const { value, hit, fallback } = await getOrComputeAnalysis(key, async () => {
+    session.llmCalls++;
+    return analyze();
+  }, (result) => {
+    if (unit === "landing") return !!result?.parsed;
+    if (unit === "rank") return Array.isArray(result);
+    if (unit === "evaluate") return !!result && typeof result.outcome === "string";
+    return false;
+  });
+  if (hit) {
+    session.cache.hits++;
+    emit(session, "cache_hit", `Reused cached ${unit} analysis`);
+    return value;
+  }
+  session.cache.misses++;
+  if (fallback && process.env.SCAN_CACHE_ENABLED !== "false" && process.env.REDIS_URL) session.cache.errors++;
+  return value;
 }
 
 // After a daily-quota error, stop calling the LLM for the rest of the scan
@@ -158,8 +191,7 @@ export async function observeNode(state) {
     try {
       const pageInfo = await extractPageInfo(page);
       const buffer = await page.screenshot({ fullPage: true });
-      session.llmCalls++;
-      const result = await analyzePage(buffer, pageInfo);
+      const result = await analyzeCached(session, "landing", { pageInfo, screenshot: fingerprintInput(buffer) }, () => analyzePage(buffer, pageInfo));
       fs.writeFileSync(path.join(session.dir, "page-info.json"), JSON.stringify(pageInfo, null, 2));
       fs.writeFileSync(
         path.join(session.dir, "landing-analysis.json"),
@@ -235,14 +267,14 @@ export async function planNode(state) {
   if (fresh.length && canUseLlm(session)) {
     try {
       const shot = await session.page.screenshot();
-      session.llmCalls++;
-      ranking = await rankActions({
+      const rankInput = {
         screenshot: shot,
         url: current.url,
         title: current.title,
         candidates,
         alreadyTried: state.actionsLog.map((l) => l.label),
-      });
+      };
+      ranking = await analyzeCached(session, "rank", { ...rankInput, screenshot: fingerprintInput(shot) }, () => rankActions(rankInput));
     } catch (err) {
       noteLlmError(session, err);
       emit(session, "warning", `LLM ranking failed, using default order: ${err.message}`);
@@ -443,12 +475,16 @@ export async function evaluateNode(state) {
 
   if (suspicious && canUseLlm(session) && result.screenshot) {
     try {
-      session.llmCalls++;
-      const verdict = await evaluateAction({
+      const evalInput = {
         screenshot: fs.readFileSync(result.screenshot),
         action: { label: action.label, kind: action.kind, href: action.target.href || null },
         result,
-      });
+      };
+      const verdict = await analyzeCached(session, "evaluate", {
+        action: evalInput.action,
+        result: { ...result, screenshot: undefined },
+        screenshot: fingerprintInput(evalInput.screenshot),
+      }, () => evaluateAction(evalInput));
       if (verdict) {
         outcome = verdict.outcome;
         summary = verdict.summary;
@@ -573,6 +609,9 @@ export async function reportNode(state) {
       actions: state.counters.actions,
       screens: Object.keys(state.states).length,
       llmCalls: session.llmCalls,
+      cache: { ...session.cache },
+      unchangedUnits: session.cache.hits,
+      changedUnits: session.cache.misses,
       activeSeconds: Math.round(activeMs(session) / 1000),
       bugs: {
         total: bugs.length,

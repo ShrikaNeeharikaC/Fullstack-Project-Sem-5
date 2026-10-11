@@ -8,6 +8,7 @@
     "codegen": "playwright codegen",
     "crawl": "node src/crawl.js",
     "tests": "node src/runTests.js",
+    "test:cache": "node --test src/crawler/scanCache.test.js",
     "claim-scans": "node src/claimScans.js"
   },
   "dependencies": {
@@ -17,6 +18,7 @@
     "dotenv": "^16.6.1",
     "express": "^5.2.1",
     "mongodb": "^6.21.0",
-    "playwright": "^1.54.2"
+    "playwright": "^1.54.2",
+    "redis": "^5.12.1"
   }
 }

@@ -31,6 +31,9 @@ export function createSession(scanId) {
     runningSince: null,
     stopRequested: false,
     llmCalls: 0,
+    cache: { hits: 0, misses: 0, errors: 0, fingerprintMs: 0 },
+    userId: null,
+    authSessionId: null,
   };
   fs.mkdirSync(session.dir, { recursive: true });
   sessions.set(scanId, session);

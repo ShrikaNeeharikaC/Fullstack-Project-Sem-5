@@ -19,10 +19,10 @@ export async function recordScanStart({ userId, kind, runId, url }) {
 
 // Called when a scan settles. A scan stopped early still has a report and
 // counts as done; a failed one is kept as "error" and not listed.
-export async function recordScanEnd(runId, { error } = {}) {
+export async function recordScanEnd(runId, { error, report } = {}) {
   await scans().updateOne(
     { runId },
-    { $set: { status: error ? "error" : "done", finishedAt: new Date(), error: error || null } },
+    { $set: { status: error ? "error" : "done", finishedAt: new Date(), error: error || null, ...(report ? { report } : {}) } },
   );
 }
 

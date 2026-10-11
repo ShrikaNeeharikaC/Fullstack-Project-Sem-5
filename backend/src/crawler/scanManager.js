@@ -9,10 +9,13 @@ const scans = new Map();
 //   askUser(question) -> Promise<answer value>   called whenever the graph pauses
 //   onEvent(event)                                optional progress callback
 // Returns the scan record; scan.done resolves with the final report.
-export function startScan(url, { askUser, onEvent } = {}) {
+export function startScan(url, { askUser, onEvent, userId, authSessionId } = {}) {
   const scanId = `scan-${Date.now()}`;
   const session = createSession(scanId);
   session.onEvent = onEvent || null;
+  session.userId = userId == null ? null : String(userId);
+  session.authSessionId = authSessionId || null;
+  session.scanUrl = url;
 
   const scan = {
     scanId,

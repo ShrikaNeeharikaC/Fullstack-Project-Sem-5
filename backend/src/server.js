@@ -65,12 +65,14 @@ app.post("/api/scan", async (req, res) => {
     return res.status(400).json({ success: false, error: urlError });
   }
   const scan = startScan(url, {
+    userId: req.user._id,
+    authSessionId: req.sessionId,
     onEvent: (e) => console.log(`[${scan.scanId}] ${e.type}: ${e.message}`),
   });
   scan.userId = req.user._id;
   await recordScanStart({ userId: req.user._id, kind: "crawl", runId: scan.scanId, url });
   scan.done
-    .then(() => recordScanEnd(scan.scanId))
+    .then((report) => recordScanEnd(scan.scanId, { report }))
     .catch((err) => {
       console.error(`[${scan.scanId}] failed:`, err);
       return recordScanEnd(scan.scanId, { error: err.message });
