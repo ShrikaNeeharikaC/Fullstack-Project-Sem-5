@@ -1,0 +1,66 @@
+# BugOps: frontend (nginx) + backend (Express + Playwright) + MongoDB + Redis.
+#   docker compose up --build
+#   Frontend: http://localhost:8080   Backend: http://localhost:3000
+# Secrets (GEMINI_API_KEY etc.) come from backend/.env; the connection
+# settings below override whatever that file says for Mongo/Redis.
+
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB: bugops
+      REDIS_URL: redis://redis:6379
+      FRONTEND_ORIGIN: http://localhost:8080
+      CRAWL_HEADLESS: "true"
+    ports:
+      - "3000:3000"
+    # Chrome crashes on Docker's default 64MB /dev/shm.
+    shm_size: "1gb"
+    volumes:
+      - artifacts:/app/artifacts
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
+  redis-data:
+  artifacts:

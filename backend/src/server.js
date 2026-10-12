@@ -8,6 +8,8 @@ import { getTestRun, startTestRun } from "./testlib/jobs.js";
 import { connectDb } from "./db.js";
 import { authRouter, requireAuth } from "./auth.js";
 import { listUserScans, recordScanEnd, recordScanStart, userBugops } from "./userScans.js";
+import { recallCredentials, rememberCredentials } from "./credentialStore.js";
+import { cleanCredentials } from "./crawler/login.js";
 
 const app = express();
 app.use(cors({ origin: process.env.FRONTEND_ORIGIN || "*" }));
@@ -58,8 +60,10 @@ app.post("/api/analyze", async (req, res) => {
 // ---- Multi-page crawl (LangGraph). Long-running: start it, then poll.
 
 // Starts a crawl and returns its id immediately.
+// Body: { url, credentials?: { username, password } }. Without credentials the
+// agent asks (via the pending question) when it meets a login form.
 app.post("/api/scan", async (req, res) => {
-  const { url } = req.body;
+  const { url, credentials } = req.body;
   const urlError = validateUrl(url);
   if (urlError) {
     return res.status(400).json({ success: false, error: urlError });
@@ -67,6 +71,9 @@ app.post("/api/scan", async (req, res) => {
   const scan = startScan(url, {
     userId: req.user._id,
     authSessionId: req.sessionId,
+    credentials: cleanCredentials(credentials),
+    // Lets a later Re-Scan of this site log in the same way.
+    onLogin: (creds) => rememberCredentials(req.user._id, url, creds),
     onEvent: (e) => console.log(`[${scan.scanId}] ${e.type}: ${e.message}`),
   });
   scan.userId = req.user._id;
@@ -88,10 +95,15 @@ app.get("/api/scan/:id", (req, res) => {
   res.json({ success: true, ...describeScan(scan) });
 });
 
-// Answers the pending question: { "answer": "approve" | "skip" | "fill" | "fill_submit" }
+// Answers the pending question: { "answer": "approve" | "skip" | "fill" | "fill_submit" | "credentials" }
+// A login question answered "credentials" also sends { credentials: { username, password } }.
 app.post("/api/scan/:id/answer", (req, res) => {
   if (!ownedBy(getScan(req.params.id), req)) return res.status(404).json({ success: false, error: "Scan not found" });
-  const ok = answerScan(req.params.id, req.body?.answer);
+  const credentials = cleanCredentials(req.body?.credentials);
+  if (req.body?.answer === "credentials" && !credentials) {
+    return res.status(400).json({ success: false, error: "Enter both a username/email and a password" });
+  }
+  const ok = answerScan(req.params.id, req.body?.answer, credentials);
   if (!ok) return res.status(409).json({ success: false, error: "Scan is not waiting for an answer" });
   res.json({ success: true });
 });
@@ -115,7 +127,9 @@ app.post("/api/tests", async (req, res) => {
   }
   const options = {};
   if (typeof allowMutations === "boolean") options.allowMutations = allowMutations;
-  if (credentials?.username && credentials?.password) options.credentials = credentials;
+  // Explicit credentials, else the ones given for this site in an earlier scan.
+  const login = cleanCredentials(credentials) || recallCredentials(req.user._id, url);
+  if (login) options.credentials = login;
   if (Number.isInteger(maxPages) && maxPages > 0) options.maxPages = Math.min(maxPages, 20);
   const run = startTestRun(url, options, { userId: req.user._id });
   await recordScanStart({ userId: req.user._id, kind: "tests", runId: run.runId, url });

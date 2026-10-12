@@ -9,6 +9,8 @@ import { TestContext, settle } from "./context.js";
 import { ALL_TEMPLATES, ELEMENT_TEMPLATES, PAGE_TEMPLATES } from "./templates/index.js";
 import { judgeOutcome } from "./templates/llmJudge.js";
 import { addLlmFixes, toBugOpsRows } from "./bugops.js";
+import { extractCandidates } from "../crawler/dom.js";
+import { findLoginForm, performLogin } from "../crawler/login.js";
 
 const SEVERITY_RANK = { high: 0, medium: 1, low: 2 };
 const firstLine = (msg) => String(msg).split("\n")[0].slice(0, 200);
@@ -33,7 +35,8 @@ export function defaultOptions() {
     // Other browsers for the cross-browser test (Playwright builds).
     browsers: (process.env.TESTS_BROWSERS || "firefox,webkit").split(",").map((b) => b.trim()).filter(Boolean),
     // Pages per site run (the start page + same-site links found on it).
-    maxPages: Number(process.env.TESTS_MAX_PAGES) || 1,
+    // Apps behind a login need several: the login page alone has nothing to test.
+    maxPages: Number(process.env.TESTS_MAX_PAGES) || 5,
   };
 }
 
@@ -299,7 +302,11 @@ export async function runSuite(url, opts = {}) {
 
   const browser = await chromium.launch({ channel: "chrome", headless: options.headless });
   try {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    // storageState: the logged-in session from logInForTests, when there is one.
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+      ...(options.storageState && { storageState: options.storageState }),
+    });
     const page = await context.newPage();
     // Links that open new tabs: the suite stays in one tab. Only pages opened
     // BY a page are closed; tabs a template opens itself are left alone.
@@ -425,7 +432,8 @@ export async function runSuite(url, opts = {}) {
       if (fixes.error) emit("warning", `LLM fixes failed: ${firstLine(fixes.error)} (template hints used)`);
     }
 
-    const { credentials, onEvent: _onEvent, ...safeOptions } = options;
+    // The session's cookies/tokens must not end up in testcases.json either.
+    const { credentials, onEvent: _onEvent, storageState, ...safeOptions } = options;
     const result = {
       runId,
       url: finalUrl,
@@ -434,7 +442,7 @@ export async function runSuite(url, opts = {}) {
       pageType: categorized.pageType,
       startedAt,
       finishedAt: new Date().toISOString(),
-      options: { ...safeOptions, credentials: credentials ? "provided" : null },
+      options: { ...safeOptions, credentials: credentials ? "provided" : null, loggedIn: !!storageState },
       llm: { categorizer: categorized.llmUsed, calls: llmCalls },
       summary: summarize(tests),
       tests,
@@ -462,34 +470,74 @@ const pageKey = (u) => {
   }
 };
 
+// With a test account: if the start page has a login form, log in once and
+// return the logged-in browser storage and the page the login led to, so
+// every page run starts already logged in. null = no login form, or it failed.
+async function logInForTests(url, options, emit) {
+  const browser = await chromium.launch({ channel: "chrome", headless: options.headless });
+  try {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await settle(page);
+    const form = findLoginForm(await extractCandidates(page));
+    if (!form) return null;
+    const loginUrl = page.url();
+    const result = await performLogin(page, options.credentials, form);
+    if (!result.ok) {
+      emit("warning", `Login with the test account failed (${result.error}): testing without logging in`);
+      return null;
+    }
+    emit("login", `Logged in with the test account: testing the pages behind the login from ${result.url}`);
+    return { storageState: await context.storageState(), url: result.url, loginUrl };
+  } catch (err) {
+    emit("warning", `Could not log in: ${firstLine(err.message)}`);
+    return null;
+  } finally {
+    await browser.close();
+  }
+}
+
 // Runs the library on several pages of one site: the start page, then the
 // same-site links found there (highest priority first), up to maxPages.
+// With a test account the pages behind the login are tested, and the login
+// page itself gets the last slot (tested logged out, for the login tests).
 // Writes one combined bugops.json so the dashboard shows the whole site.
 export async function runSite(url, opts = {}) {
   const options = { ...defaultOptions(), ...opts };
-  if (options.maxPages <= 1) return runSuite(url, opts);
   const emit = (type, message) => options.onEvent?.({ at: new Date().toISOString(), type, message });
+  const auth = options.credentials ? await logInForTests(url, options, emit) : null;
+  const startUrl = auth?.url || url;
+  const pageOpts = auth ? { ...opts, storageState: auth.storageState } : opts;
+  if (options.maxPages <= 1) return runSuite(startUrl, pageOpts);
   const siteId = options.runId || `tests-${Date.now()}`;
   const dir = path.join("artifacts", "tests", siteId);
   const pageRunId = (n) => `${siteId}/page-${String(n).padStart(2, "0")}`;
+  const appPages = options.maxPages - (auth ? 1 : 0);
 
-  emit("site", `Page 1/${options.maxPages}: ${url}`);
-  const pages = [await runSuite(url, { ...opts, runId: pageRunId(1) })];
-  const seen = new Set([pageKey(url), pageKey(pages[0].url)]);
+  emit("site", `Page 1/${options.maxPages}: ${startUrl}`);
+  const pages = [await runSuite(startUrl, { ...pageOpts, runId: pageRunId(1) })];
+  const seen = new Set([pageKey(url), pageKey(startUrl), pageKey(pages[0].url)]);
+  if (auth) seen.add(pageKey(auth.loginUrl));
   const failedPages = [];
 
-  for (const link of pages[0].links) {
-    if (pages.length >= options.maxPages) break;
-    if (seen.has(pageKey(link))) continue;
-    seen.add(pageKey(link));
+  const runPage = async (link, runOpts) => {
     emit("site", `Page ${pages.length + 1}/${options.maxPages}: ${link}`);
     try {
-      pages.push(await runSuite(link, { ...opts, runId: pageRunId(pages.length + 1) }));
+      pages.push(await runSuite(link, { ...runOpts, runId: pageRunId(pages.length + 1) }));
     } catch (err) {
       failedPages.push({ url: link, error: firstLine(err.message) });
       emit("warning", `Could not test ${link}: ${firstLine(err.message)}`);
     }
+  };
+
+  for (const link of pages[0].links) {
+    if (pages.length >= appPages) break;
+    if (seen.has(pageKey(link))) continue;
+    seen.add(pageKey(link));
+    await runPage(link, pageOpts);
   }
+  if (auth) await runPage(auth.loginUrl, opts);
 
   const bugops = pages
     .flatMap((p) => p.bugops)

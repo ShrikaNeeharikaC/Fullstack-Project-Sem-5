@@ -6,6 +6,7 @@ import { extractPageInfo } from "../pageAnalyzer.js";
 import { getCrawlLimits } from "./config.js";
 import { extractCandidates, fingerprint, locateClickable, locateField, normalizeUrl } from "./dom.js";
 import { rankActions, evaluateAction } from "./llm.js";
+import { ensureLoggedIn, findLoginForm, formKey, performLogin } from "./login.js";
 import { isRiskyByKeyword, testValueFor } from "./safety.js";
 import { activeMs, emit, getSession, openBrowser } from "./session.js";
 import { cacheKey, fingerprintInput, getOrComputeAnalysis } from "./scanCache.js";
@@ -36,7 +37,9 @@ async function analyzeCached(session, unit, input, analyze) {
     userId: session.userId,
     sessionId: session.authSessionId,
     url: session.scanUrl,
-    config: { limits, viewport: "1440x900", model: process.env.GEMINI_MODEL || "gemini-2.5-flash" },
+    // promptVersion: bump when a prompt or its reply shape changes, so old
+    // cached replies aren't reused.
+    config: { limits, viewport: "1440x900", model: process.env.GEMINI_MODEL || "gemini-2.5-flash", promptVersion: 2 },
     unit,
     input: inputHash,
   });
@@ -68,6 +71,35 @@ function noteLlmError(session, err) {
   }
 }
 
+// What the app is, from the landing analysis, so the planner and evaluator
+// can reason about this app's own logic instead of generic UI behaviour.
+function siteContext(state) {
+  const landing = state.landing;
+  if (!landing || landing.error) return null;
+  return {
+    purpose: landing.page?.purpose || "",
+    sections: (landing.layout?.sections || []).slice(0, 10),
+    possibleActions: (landing.possible_actions || []).slice(0, 15),
+  };
+}
+
+// Keeps only usable LLM-suggested form values, keyed by field index.
+// Passwords and files keep the built-in test values; emails must stay on
+// example.com so nothing reaches a real inbox.
+function cleanFormValues(form, values) {
+  if (!values || typeof values !== "object") return null;
+  const out = {};
+  form.fields.forEach((field, i) => {
+    const value = values[`f${i}`];
+    if (typeof value !== "string" || !value.trim()) return;
+    if (["password", "file", "checkbox", "radio"].includes(field.type)) return;
+    const isEmail = field.type === "email" || /email/i.test(`${field.name} ${field.label}`);
+    if (isEmail && !/@example\.(com|org|net)$/i.test(value.trim())) return;
+    out[i] = value.slice(0, 200);
+  });
+  return Object.keys(out).length ? out : null;
+}
+
 function actionLabel(action) {
   if (action.kind === "visit") return `Visit "${action.target.text || action.target.href}"`;
   if (action.kind === "click") return `Click "${action.target.text || action.target.ariaLabel || action.target.tag}"`;
@@ -96,10 +128,13 @@ async function performAction(page, action, decision) {
     return {};
   }
 
-  // Form: fill every field with obviously fake data, submit only if approved.
+  // Form: fill every field with test data (the planner's app-specific values
+  // where it gave them, obviously fake defaults otherwise), submit only if approved.
   let lastFilled = null;
-  for (const field of action.target.fields) {
-    const plan = testValueFor(field);
+  for (const [i, field] of action.target.fields.entries()) {
+    const custom = action.values?.[i];
+    const plan =
+      custom === undefined ? testValueFor(field) : field.tag === "select" ? { kind: "select", label: custom } : { kind: "fill", value: custom };
     const locator = locateField(page, field);
     if (plan.kind === "fill") {
       await locator.fill(plan.value, { timeout: 5000 });
@@ -107,8 +142,11 @@ async function performAction(page, action, decision) {
     } else if (plan.kind === "check") {
       await locator.check({ timeout: 5000 }).catch(() => {});
     } else if (plan.kind === "select") {
-      const options = await locator.locator("option").count();
-      if (options > 1) await locator.selectOption({ index: 1 }, { timeout: 5000 });
+      const picked = plan.label && (await locator.selectOption({ label: plan.label }, { timeout: 2000 }).catch(() => null));
+      if (!picked) {
+        const options = await locator.locator("option").count();
+        if (options > 1) await locator.selectOption({ index: 1 }, { timeout: 5000 });
+      }
     }
   }
   if (decision === "fill_submit") {
@@ -167,6 +205,86 @@ export async function initNode(state) {
         explorable: true,
         screenshot: shot.file,
       },
+    },
+  };
+}
+
+const MAX_LOGIN_ATTEMPTS = 3;
+
+// login: if the landing screen is a login form, ask the user how to get past
+// it: log in with their own account, treat it as an ordinary form (test
+// data), or skip it and explore the public pages only. Credentials given in
+// the scan request skip the question. The credentials themselves stay on the
+// live session (see scanManager), never in graph state.
+// interrupt() re-runs this node from the top on resume, so nothing before it
+// may have side effects (reading the page is fine).
+export async function loginNode(state) {
+  const session = getSession(state.scanId);
+  const page = session.page;
+  const current = state.states[state.currentStateId];
+  const form = findLoginForm(await extractCandidates(page));
+  if (!form) return { login: state.login?.status === "retry" ? { ...state.login, status: "gone" } : null };
+
+  const attempts = state.login?.attempts || 0;
+  const key = formKey(new URL(current.url).pathname, form);
+  let choice = "credentials";
+
+  if (!session.credentials) {
+    const retryNote = state.login?.error ? ` The last attempt failed: ${state.login.error}.` : "";
+    const answer = interrupt({
+      type: "login",
+      question: `The agent found a login form on ${current.url}. How should it get past it?${retryNote}`,
+      action: {
+        label: "Login form",
+        fields: form.fields.map(({ type, name, label, placeholder, tag }) => ({ type, name, label, placeholder, tag })),
+        submitText: form.submitText,
+      },
+      options: [
+        { value: "credentials", label: "Log in with my account", needsCredentials: true },
+        { value: "fill", label: "Fill it with test data like any other form" },
+        { value: "skip", label: "Don't log in: scan the public pages only" },
+      ],
+    });
+    choice = ["credentials", "fill", "skip"].includes(answer) ? answer : "skip";
+    // "credentials" without credentials attached (e.g. a bare API answer).
+    if (choice === "credentials" && !session.credentials) choice = "skip";
+  }
+
+  if (choice !== "credentials") {
+    emit(session, "login", choice === "fill" ? "Login form will be filled with test data" : "Not logging in: scanning public pages only");
+    return { login: { choice, formKey: key, status: "declined", attempts } };
+  }
+
+  emit(session, "login", `Logging in on ${current.url}`);
+  const result = await performLogin(page, session.credentials, form);
+  if (!result.ok) {
+    const next = attempts + 1;
+    emit(session, "warning", `Login failed (attempt ${next}/${MAX_LOGIN_ATTEMPTS}): ${result.error}`);
+    // Wrong credentials: forget them so the next attempt asks again.
+    session.credentials = null;
+    await page.goto(current.url, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+    await settle(page);
+    const giveUp = next >= MAX_LOGIN_ATTEMPTS;
+    if (giveUp) emit(session, "warning", "Giving up on login: scanning public pages only");
+    return { login: { choice, formKey: key, status: giveUp ? "failed" : "retry", attempts: next, error: result.error } };
+  }
+
+  // Logged in: the screen behind the login becomes the crawl's starting
+  // point (depth 0, so the landing analysis describes the real app). The login
+  // screen is kept for the report but not explored.
+  const snapshot = await extractCandidates(page);
+  const id = fingerprint(snapshot);
+  const shot = await screenshot(session, "after-login");
+  session.signals = [];
+  session.onLogin?.(session.credentials);
+  emit(session, "login", `Logged in: now at ${page.url()}`);
+  return {
+    login: { choice, formKey: key, status: "logged_in", attempts: attempts + 1, screenId: current.id },
+    currentStateId: id,
+    states: {
+      ...state.states,
+      [current.id]: { ...current, explorable: false },
+      [id]: { id, url: page.url(), title: snapshot.title, path: [], depth: 0, explorable: true, screenshot: shot.file },
     },
   };
 }
@@ -261,6 +379,15 @@ export async function planNode(state) {
     kind: a.kind,
     label: actionLabel(a),
     href: a.target.href || null,
+    ...(a.kind === "form" && {
+      fields: a.target.fields.map((f, j) => ({
+        key: `f${j}`,
+        label: f.label || f.placeholder || f.name || "",
+        type: f.type || f.tag,
+        required: !!f.required,
+      })),
+      submitText: a.target.submitText || "",
+    }),
   }));
 
   let ranking = null;
@@ -273,6 +400,10 @@ export async function planNode(state) {
         title: current.title,
         candidates,
         alreadyTried: state.actionsLog.map((l) => l.label),
+        site: siteContext(state),
+        screensSeen: Object.values(state.states)
+          .slice(0, 25)
+          .map((s) => `${new URL(s.url).pathname} - ${s.title}`),
       };
       ranking = await analyzeCached(session, "rank", { ...rankInput, screenshot: fingerprintInput(shot) }, () => rankActions(rankInput));
     } catch (err) {
@@ -295,6 +426,8 @@ export async function planNode(state) {
       reason: r?.reason || "",
       risky: keywordRisk || r?.risky === true,
       riskReason: r?.risk_reason || (keywordRisk ? "Label matches a destructive/side-effect keyword" : ""),
+      expect: typeof r?.expect === "string" ? r.expect.slice(0, 300) : "",
+      values: a.kind === "form" ? cleanFormValues(a.target, r?.values) : null,
     };
   });
 
@@ -330,12 +463,23 @@ export async function selectNode(state) {
 export async function approveNode(state) {
   const action = state.pending;
   let decision = "auto";
+  // The user already decided about the login form in the login step.
+  const loginChoice = action.kind === "form" && action.key === state.login?.formKey ? state.login.choice : null;
 
-  if (action.kind === "form") {
+  if (loginChoice) {
+    decision = loginChoice === "fill" ? "fill_submit" : "skip";
+  } else if (action.kind === "form") {
     const answer = interrupt({
       type: "form",
       question: `The agent found a form on ${state.states[action.sourceStateId].url}. How should it handle it?`,
-      action: { label: action.label, fields: action.target.fields, submitText: action.target.submitText },
+      action: {
+        label: action.label,
+        fields: action.target.fields,
+        submitText: action.target.submitText,
+        // What the agent would type (by field index) and expects to happen.
+        values: action.values,
+        expect: action.expect,
+      },
       risky: action.risky,
       riskReason: action.riskReason,
       options: [
@@ -397,6 +541,10 @@ export async function actNode(state) {
     if (action.kind !== "visit") {
       await page.goto(source.url, { waitUntil: "domcontentloaded", timeout: 30000 });
       await settle(page);
+      if (state.login?.status === "logged_in" && (await ensureLoggedIn(page, session.credentials, source.url))) {
+        await settle(page);
+        emit(session, "login", "Session was lost: logged in again");
+      }
       for (const step of source.path) {
         await performAction(page, step.action, step.decision);
         await settle(page);
@@ -469,21 +617,33 @@ export async function evaluateNode(state) {
     httpFailed ||
     (!result.changed && (action.kind === "click" || action.kind === "toggle"));
 
+  // App-logic check: actions that should change the app's data or UI (not
+  // plain link visits) get their planner-written expectation verified even
+  // when no error signal fired, since logic bugs rarely throw errors.
+  const logicCheck =
+    !!action.expect &&
+    (action.kind === "click" || action.kind === "toggle" || (action.kind === "form" && state.decision === "fill_submit"));
+
   let outcome = result.changed ? "worked" : "no_visible_effect";
   let summary = result.isNewState ? `Reached a new screen: ${result.urlAfter}` : "";
   let bugs = [];
 
-  if (suspicious && canUseLlm(session) && result.screenshot) {
+  if ((suspicious || logicCheck) && canUseLlm(session) && result.screenshot) {
     try {
+      const beforeFile = state.states[action.sourceStateId]?.screenshot;
       const evalInput = {
         screenshot: fs.readFileSync(result.screenshot),
-        action: { label: action.label, kind: action.kind, href: action.target.href || null },
+        beforeScreenshot: beforeFile && fs.existsSync(beforeFile) ? fs.readFileSync(beforeFile) : null,
+        action: { label: action.label, kind: action.kind, href: action.target.href || null, expect: action.expect || "" },
         result,
+        site: siteContext(state),
       };
       const verdict = await analyzeCached(session, "evaluate", {
         action: evalInput.action,
+        site: evalInput.site,
         result: { ...result, screenshot: undefined },
         screenshot: fingerprintInput(evalInput.screenshot),
+        beforeScreenshot: evalInput.beforeScreenshot ? fingerprintInput(evalInput.beforeScreenshot) : null,
       }, () => evaluateAction(evalInput));
       if (verdict) {
         outcome = verdict.outcome;
@@ -517,6 +677,7 @@ export async function evaluateNode(state) {
         decision: state.decision,
         priority: action.priority,
         reason: action.reason,
+        expected: action.expect || "",
         urlBefore: result.urlBefore,
         urlAfter: result.urlAfter,
         outcome,
@@ -636,6 +797,10 @@ export async function reportNode(state) {
 }
 
 // ------------------------------------------------------------- routing
+
+export function afterLogin(state) {
+  return state.login?.status === "retry" ? "authenticate" : "observe";
+}
 
 export function afterSelect(state) {
   return state.pending ? "approve" : "report";

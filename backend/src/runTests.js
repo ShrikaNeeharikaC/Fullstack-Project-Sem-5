@@ -1,8 +1,9 @@
 // Terminal runner for the reusable test library.
 //   npm run tests -- <url> [<url> ...] [--allow-mutations] [--no-llm] [--headed] [--max=N] [--search=term]
 //                     [--pages=N] [--browsers=firefox,webkit]
-// Stateful tests (create/delete/cart) only run with --allow-mutations; the
-// login test only runs when TEST_USERNAME / TEST_PASSWORD are set in .env.
+// Stateful tests (create/delete/cart) only run with --allow-mutations. When
+// TEST_USERNAME / TEST_PASSWORD are set in .env, it logs in first and tests the
+// pages behind the login.
 import "dotenv/config";
 import { runSite } from "./testlib/runner.js";
 

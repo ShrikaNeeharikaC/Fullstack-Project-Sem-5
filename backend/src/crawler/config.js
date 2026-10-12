@@ -10,19 +10,20 @@ export function getCrawlLimits() {
   return {
     // Wall-clock time spent crawling. Time spent waiting for the user to
     // answer a question does NOT count.
-    timeLimitMs: num("CRAWL_TIME_LIMIT_MS", 5 * 60 * 1000),
+    timeLimitMs: num("CRAWL_TIME_LIMIT_MS", 15 * 60 * 1000),
     // Clicks / link visits / form fills performed.
-    maxActions: num("CRAWL_MAX_ACTIONS", 25),
+    maxActions: num("CRAWL_MAX_ACTIONS", 60),
     // Distinct screens (URL + DOM fingerprint) discovered.
-    maxStates: num("CRAWL_MAX_STATES", 15),
+    maxStates: num("CRAWL_MAX_STATES", 40),
     // How many actions deep from the landing page a screen may be and
-    // still get explored further.
-    maxDepth: num("CRAWL_MAX_DEPTH", 3),
+    // still get explored further. Getting past a login alone takes 2-3
+    // levels, so this must leave room for the app behind it.
+    maxDepth: num("CRAWL_MAX_DEPTH", 6),
     // Stop when this many actions in a row discover nothing new.
-    noNoveltyLimit: num("CRAWL_NO_NOVELTY_LIMIT", 6),
+    noNoveltyLimit: num("CRAWL_NO_NOVELTY_LIMIT", 12),
     // LLM requests for the whole scan. Past this, the crawler falls back to
     // rule-based ranking and signal-only bug reports instead of failing.
-    maxLlmCalls: num("CRAWL_MAX_LLM_CALLS", 40),
+    maxLlmCalls: num("CRAWL_MAX_LLM_CALLS", 90),
   };
 }
 

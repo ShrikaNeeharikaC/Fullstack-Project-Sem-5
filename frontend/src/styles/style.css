@@ -142,11 +142,6 @@ h1, h2, h3, h4, p { margin: 0; }
   font-weight: 700;
   color: var(--purple-deep);
 }
-.logo-mark {
-  width: 30px;
-  height: 30px;
-  flex-shrink: 0;
-}
 .nav-links {
   display: flex;
   align-items: center;
@@ -1144,3 +1139,18 @@ table.bug-table {
   text-align: left;
   vertical-align: top;
 }
+#crawl-question .q-login {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+#crawl-question .q-login input {
+  flex: 1 1 180px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--purple-table-header);
+  border-radius: 6px;
+}
+#crawl-question .q-hint { flex-basis: 100%; margin: 0; font-size: 0.85em; color: var(--text-body); }
+#crawl-question .q-error { margin: 8px 0 0; color: var(--severity-high); }

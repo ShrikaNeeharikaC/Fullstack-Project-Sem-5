@@ -1,6 +1,7 @@
 import { Command } from "@langchain/langgraph";
 import { buildCrawlGraph } from "./graph.js";
 import { closeSession, createSession, emit, markPaused, markRunning } from "./session.js";
+import { cleanCredentials } from "./login.js";
 
 const graph = buildCrawlGraph();
 const scans = new Map();
@@ -8,14 +9,19 @@ const scans = new Map();
 // Starts a crawl in the background.
 //   askUser(question) -> Promise<answer value>   called whenever the graph pauses
 //   onEvent(event)                                optional progress callback
+//   credentials { username, password }            optional: log in without asking
+//   onLogin(credentials)                          optional: called after a successful login
 // Returns the scan record; scan.done resolves with the final report.
-export function startScan(url, { askUser, onEvent, userId, authSessionId } = {}) {
+export function startScan(url, { askUser, onEvent, userId, authSessionId, credentials, onLogin } = {}) {
   const scanId = `scan-${Date.now()}`;
   const session = createSession(scanId);
   session.onEvent = onEvent || null;
   session.userId = userId == null ? null : String(userId);
   session.authSessionId = authSessionId || null;
   session.scanUrl = url;
+  // Kept on the live session only: never in graph state, events or reports.
+  session.credentials = cleanCredentials(credentials);
+  session.onLogin = onLogin || null;
 
   const scan = {
     scanId,
@@ -65,7 +71,14 @@ async function run(scan, ask) {
       scan.question = pending.value;
       emit(scan.session, "question", pending.value.question, { question: pending.value });
 
-      const answer = await ask(pending.value);
+      // An answer is an option value, or { value, credentials } for the
+      // "Log in with my account" option of the login question.
+      let answer = await ask(pending.value);
+      if (answer && typeof answer === "object") {
+        const credentials = cleanCredentials(answer.credentials);
+        if (credentials) scan.session.credentials = credentials;
+        answer = answer.value;
+      }
 
       scan.question = null;
       scan.resolveAnswer = null;
@@ -88,11 +101,12 @@ export function getScan(scanId) {
   return scans.get(scanId) || null;
 }
 
-// Supplies the user's answer to a paused scan.
-export function answerScan(scanId, answer) {
+// Supplies the user's answer to a paused scan (plus credentials when the
+// answer to a login question is "credentials").
+export function answerScan(scanId, answer, credentials = null) {
   const scan = scans.get(scanId);
   if (!scan || scan.status !== "waiting_for_user" || !scan.resolveAnswer) return false;
-  scan.resolveAnswer(answer);
+  scan.resolveAnswer(credentials ? { value: answer, credentials } : answer);
   return true;
 }
 

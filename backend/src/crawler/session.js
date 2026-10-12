@@ -3,6 +3,10 @@ import fs from "fs";
 import path from "path";
 import { CRAWL_HEADLESS } from "./config.js";
 
+// The main takeaway
+// The Map is for accessing live objects quickly; LangGraph checkpointing is for saving workflow data so it can resume.
+// They solve two different problems, which is why your crawler uses both.
+
 // Live Playwright objects can't be stored in LangGraph state (state must be
 // plain serialisable data), so each scan's browser lives here, keyed by the
 // scan id, which is also the LangGraph thread_id.

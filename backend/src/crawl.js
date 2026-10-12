@@ -1,6 +1,6 @@
 // Terminal runner for the LangGraph crawler (until the frontend is built).
 //   npm run crawl -- https://demo.playwright.dev/todomvc/
-// Questions about risky actions and forms are asked here in the terminal.
+// Questions about risky actions, forms and login are asked here in the terminal.
 import "dotenv/config";
 import readline from "readline/promises";
 import { stdin, stdout } from "process";
@@ -29,6 +29,11 @@ async function askUser(question) {
   for (;;) {
     const reply = (await rl.question("   Choose a number: ")).trim();
     const option = question.options[Number(reply) - 1];
+    if (option?.needsCredentials) {
+      const username = (await rl.question("   Email / username: ")).trim();
+      const password = await rl.question("   Password (shown as you type): ");
+      return { value: option.value, credentials: { username, password } };
+    }
     if (option) return option.value;
     console.log("   Please type one of the numbers above.");
   }

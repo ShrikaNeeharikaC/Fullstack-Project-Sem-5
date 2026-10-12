@@ -12,10 +12,12 @@ import {
   actNode,
   afterApprove,
   afterEvaluate,
+  afterLogin,
   afterSelect,
   approveNode,
   evaluateNode,
   initNode,
+  loginNode,
   observeNode,
   planNode,
   reportNode,
@@ -44,17 +46,23 @@ const CrawlState = Annotation.Root({
   bugs: Annotation({ reducer: (_, v) => v, default: () => [] }),
   skipped: Annotation({ reducer: (_, v) => v, default: () => [] }),
   counters: Annotation({ reducer: (_, v) => v, default: () => ({ actions: 0, noNovelty: 0 }) }),
+  // Outcome of the login step: { choice, formKey, status, attempts, error?, screenId? }.
+  // Never holds the credentials themselves.
+  login: Annotation({ reducer: (_, v) => v, default: () => null }),
   stopReason: Annotation({ reducer: (_, v) => v, default: () => null }),
   finalReport: Annotation({ reducer: (_, v) => v, default: () => null }),
 });
 
-//  init → observe → plan → select ─┬─→ approve ─┬─→ act → evaluate ─┬─→ observe (new screen)
+//  init → authenticate (repeats on a failed login, asking again) → observe → …
+//
+//         observe → plan → select ─┬─→ approve ─┬─→ act → evaluate ─┬─→ observe (new screen)
 //                     ▲            │            └─→ select (skipped) └─→ select
 //                     │            └─→ report → END (budget hit / nothing left)
 //                     └─ observe ←─ (new explorable screen)
 export function buildCrawlGraph() {
   const graph = new StateGraph(CrawlState)
     .addNode("init", initNode)
+    .addNode("authenticate", loginNode)
     .addNode("observe", observeNode)
     .addNode("plan", planNode)
     .addNode("select", selectNode)
@@ -63,7 +71,8 @@ export function buildCrawlGraph() {
     .addNode("evaluate", evaluateNode)
     .addNode("report", reportNode)
     .addEdge(START, "init")
-    .addEdge("init", "observe")
+    .addEdge("init", "authenticate")
+    .addConditionalEdges("authenticate", afterLogin, ["authenticate", "observe"])
     .addEdge("observe", "plan")
     .addEdge("plan", "select")
     .addConditionalEdges("select", afterSelect, ["approve", "report"])
