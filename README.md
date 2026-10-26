@@ -1,4 +1,4 @@
-# 🐞 BugOps
+#  BugOps
 
 **AI-powered bug detection for live web apps.** Paste in a URL, and BugOps crawls your site like a real user, flags issues, and hands you a prioritized list of bugs with root causes and suggested fixes.
 
@@ -8,14 +8,15 @@
 
 ---
 
-## ✨ Features
+##  Features
 
 - **Autonomous crawling agent**: follows an observe → plan → act loop, visiting links page by page (with depth tracking and an action queue).
 - **Bug detection** across four categories:
-  - 🔗 **Broken links**: 404s, dead redirects, missing assets
-  - 🖥️ **Console errors**: JS exceptions and failed network calls
-  - 🧩 **UI / layout issues**: overlaps, overflow, responsive breaks
-  - ⚡ **Performance issues**: slow loads, large payloads, bottlenecks
+  -  **Broken links**: 404s, dead redirects, missing assets
+  -  **Console errors**: JS exceptions and failed network calls
+  -  **UI / layout issues**: overlaps, overflow, responsive breaks
+  -  **Performance issues**: slow loads, large payloads, bottlenecks
+  -  **Logical errors**: behavior that doesn't work as expected (e.g. actions leading to the wrong screen or a broken state), with suggested fixes
 - **Severity ranking**: bugs are tagged `high`, `medium` or `low`.
 - **Root cause + suggested fix** for every bug found.
 - **Live scan log**: watch the agent work in real time, and stop a scan at any time.
@@ -25,7 +26,7 @@
 
 ---
 
-## 📸 Screenshots
+##  Screenshots
 
 ### Scan your app
 Enter a live URL and kick off a scan. The page also lists what BugOps checks for.
@@ -54,9 +55,9 @@ Jump back into any previous scan's results from the home page.
 
 ---
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
-> ⚠️ Fill in / correct this section to match your `package.json` and backend.
+>  Fill in / correct this section to match your `package.json` and backend.
 
 | Layer | Technology |
 |-------|-----------|
@@ -69,9 +70,9 @@ Jump back into any previous scan's results from the home page.
 
 ---
 
-## 📁 Project Structure
+##  Project Structure
 
-> ⚠️ Update to match your repo.
+>  Update to match your repo.
 
 ```
 Fullstack-Project-Sem-5/
@@ -83,7 +84,7 @@ Fullstack-Project-Sem-5/
 
 ---
 
-## 🚀 Getting Started
+##  Getting Started
 
 ### Prerequisites
 
@@ -138,7 +139,7 @@ Open **http://localhost:3000** in your browser.
 
 ---
 
-## 🧭 How It Works
+##  How It Works
 
 1. **Submit a URL** on the Scan page.
 2. The agent **observes** the current page and collects signals (console errors, failed requests, layout problems).
@@ -149,7 +150,7 @@ Open **http://localhost:3000** in your browser.
 
 ---
 
-## 🗺️ Roadmap
+##  Roadmap
 
 - [ ] Smarter, code-aware fix suggestions (replace generic "inspect the console" advice)
 - [ ] Form-filling and authenticated-flow scanning
@@ -159,12 +160,12 @@ Open **http://localhost:3000** in your browser.
 
 ---
 
-## 👥 Authors
+##  Authors
 
 - **Sarvesh** and team: Fullstack Project, Semester 5
 
 ---
 
-## 📄 License
+##  License
 
 Add a license of your choice (e.g. MIT).
