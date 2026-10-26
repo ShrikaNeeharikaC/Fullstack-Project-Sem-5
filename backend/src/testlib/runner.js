@@ -25,6 +25,8 @@ export function defaultOptions() {
     maxElementTests: Number(process.env.TESTS_MAX_ELEMENT_TESTS) || 25,
     maxPerTemplate: 6,
     maxLinks: 8,
+    // Links the link-checker requests (no clicks).
+    maxLinkChecks: Number(process.env.TESTS_MAX_LINK_CHECKS) || 40,
     searchTerm: "test",
     // Clicks on menus/toggles to find elements that only appear afterwards.
     maxDiscoveryClicks: 5,

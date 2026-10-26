@@ -13,12 +13,18 @@ import performance from "./performance.js";
 import responsive from "./responsive.js";
 import apiFailure from "./apiFailure.js";
 import crossBrowser from "./crossBrowser.js";
+import securityHeaders from "./securityHeaders.js";
+import seoMeta from "./seoMeta.js";
+import notFound from "./notFound.js";
+import linkChecker from "./linkChecker.js";
 import navLink from "./navLink.js";
+import backButton from "./backButton.js";
 import genericClick from "./genericClick.js";
 import formValidation from "./formValidation.js";
 import invalidInput from "./invalidInput.js";
 import serverValidation from "./serverValidation.js";
 import multiStep from "./multiStep.js";
+import doubleSubmit from "./doubleSubmit.js";
 import search from "./search.js";
 import upload from "./upload.js";
 import { invalidLogin, validLogin } from "./auth.js";
@@ -34,6 +40,10 @@ export const PAGE_TEMPLATES = [
   responsive,
   apiFailure,
   crossBrowser,
+  securityHeaders,
+  seoMeta,
+  notFound,
+  linkChecker,
 ];
 
 // Order matters: create-item, then update-item, then delete-item (which only
@@ -46,10 +56,12 @@ export const ELEMENT_TEMPLATES = [
   invalidInput,
   serverValidation,
   multiStep,
+  doubleSubmit,
   createItem,
   cart,
   upload,
   navLink,
+  backButton,
   genericClick,
   updateItem,
   deleteItem,
