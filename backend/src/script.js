@@ -1,6 +1,7 @@
 import { chromium } from "playwright";
 import dotenv from "dotenv";
 import fs from "fs";
+import { installPublicNetworkGuard } from "./urlSafety.js";
 
 dotenv.config();
 
@@ -17,13 +18,12 @@ if (!TARGET_URL) {
 
 const browser = await chromium.launch({
   headless: HEADLESS,
-  // Uses the installed Google Chrome instead of Playwright's bundled Chromium.
-  channel: "chrome",
 });
 
 const context = await browser.newContext({
   viewport: { width: 1440, height: 900 },
 });
+await installPublicNetworkGuard(context);
 
 const page = await context.newPage();
 

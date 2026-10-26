@@ -132,3 +132,12 @@ export function describeScan(scan) {
     report: scan.report,
   };
 }
+
+export async function shutdownScans() {
+  const active = [...scans.values()].filter((scan) =>
+    scan.status === "running" || scan.status === "waiting_for_user",
+  );
+  for (const scan of active) stopScan(scan.scanId);
+  await Promise.all(active.map((scan) => closeSession(scan.scanId)));
+  await Promise.all(active.map((scan) => scan.done?.catch(() => {})));
+}

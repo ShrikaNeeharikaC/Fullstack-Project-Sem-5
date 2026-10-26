@@ -8,9 +8,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-# The code launches installed Google Chrome (channel: "chrome"), which the
-# image doesn't include. Chrome for Linux is amd64-only.
-RUN npx playwright install --with-deps chrome
+# The Playwright base image includes the matching bundled Chromium and its
+# system dependencies. Use that browser to avoid downloading Chrome at build time.
 
 COPY src ./src
 
