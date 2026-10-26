@@ -57,28 +57,50 @@ Jump back into any previous scan's results from the home page.
 
 ##  Tech Stack
 
->  Fill in / correct this section to match your `package.json` and backend.
-
 | Layer | Technology |
 |-------|-----------|
-| Frontend | React |
-| Backend | _e.g. Node.js / Express_ |
-| Crawler / Browser automation | _e.g. Playwright / Puppeteer_ |
-| Database | _e.g. MongoDB / PostgreSQL_ |
+| Frontend | React 18, JavaScript, Vite 5 |
+| Backend API | Node.js (ES modules), Express 5 |
+| Browser automation | Playwright with Chromium |
+| Agent workflow | LangGraph.js |
+| Database | MongoDB 7, using the official Node.js driver |
+| Cache | Redis 7 for optional scan-analysis caching |
 | AI | Google Gemini API |
-| Auth | _e.g. JWT_ |
+| Authentication | Bearer-token sessions; passwords are hashed with Node.js `scrypt` and sessions are stored in MongoDB |
+| Runtime / serving | Docker Compose and Nginx |
 
 ---
 
 ##  Project Structure
 
->  Update to match your repo.
-
 ```
 Fullstack-Project-Sem-5/
-├── client/          # React frontend
-├── server/          # Backend API + crawling agent
-├── screenshots/     # README images
+├── backend/
+│   ├── src/
+│   │   ├── crawler/             # LangGraph crawl workflow, browser session, and page actions
+│   │   ├── llm/                 # Gemini API integration
+│   │   ├── testlib/
+│   │   │   └── templates/       # Reusable browser-based QA checks
+│   │   ├── auth.js              # Signup, login, and bearer-token sessions
+│   │   ├── db.js                # MongoDB connection and indexes
+│   │   └── server.js            # Express API
+│   ├── .env.example             # Backend configuration template
+│   ├── Dockerfile
+│   ├── package-lock.json
+│   └── package.json
+├── frontend/
+│   ├── src/
+│   │   ├── components/          # Shared React UI components
+│   │   ├── lib/                 # Frontend helpers and API/auth utilities
+│   │   ├── pages/               # Home, scan, login, signup, and dashboard pages
+│   │   └── styles/              # Application styles
+│   ├── *.html                   # Vite entry points for each page
+│   ├── Dockerfile
+│   ├── nginx.conf
+│   ├── package-lock.json
+│   └── package.json
+├── screenshots/                 # README screenshots
+├── docker-compose.yml           # Frontend, backend, MongoDB, and Redis services
 └── README.md
 ```
 
