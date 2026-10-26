@@ -2,7 +2,6 @@
 
 **AI-powered bug detection for live web apps.** Paste in a URL, and BugOps crawls your site like a real user, flags issues, and hands you a prioritized list of bugs with root causes and suggested fixes.
 
-> Branch: `react-final` · Fullstack Project, Semester 5
 
 ![BugOps landing page](screenshots/landing.png)
 
@@ -167,7 +166,7 @@ Open **http://localhost:3000** in your browser.
 2. The agent **observes** the current page and collects signals (console errors, failed requests, layout problems).
 3. It **plans** by queueing new links and actions to try.
 4. It **acts** by visiting each page or link and checking the outcome.
-5. Issues are **evaluated** (with the LLM, if available), ranked by severity, and given a root cause and suggested fix.
+5. Built-in **test templates** run checks and combine their results with browser signals such as JavaScript errors and failed requests. Gemini can optionally help categorize elements, review selected results for logic issues, and suggest fixes; template checks and hints still work without it.
 6. Results are saved to your **dashboard** so you can revisit them later.
 
 ---
@@ -182,12 +181,3 @@ Open **http://localhost:3000** in your browser.
 
 ---
 
-##  Authors
-
-- **Sarvesh** and team: Fullstack Project, Semester 5
-
----
-
-##  License
-
-Add a license of your choice (e.g. MIT).
