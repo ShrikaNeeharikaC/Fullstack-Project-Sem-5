@@ -24,6 +24,10 @@ services:
       REDIS_URL: redis://redis:6379
       FRONTEND_ORIGIN: http://localhost:8080
       CRAWL_HEADLESS: "true"
+      # Scanning http://localhost:5173 should reach the host's app, not the container.
+      HOST_LOOPBACK_TO_HOST: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "3000:3000"
     # Chrome crashes on Docker's default 64MB /dev/shm.

@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import fs from "fs";
 import path from "path";
 import { CRAWL_HEADLESS } from "./config.js";
+import { chromeArgs } from "../browserArgs.js";
 
 // The main takeaway
 // The Map is for accessing live objects quickly; LangGraph checkpointing is for saving workflow data so it can resume.
@@ -45,7 +46,7 @@ export function createSession(scanId) {
 }
 
 export async function openBrowser(session) {
-  session.browser = await chromium.launch({ channel: "chrome", headless: CRAWL_HEADLESS });
+  session.browser = await chromium.launch({ channel: "chrome", headless: CRAWL_HEADLESS, args: chromeArgs() });
   session.context = await session.browser.newContext({ viewport: { width: 1440, height: 900 } });
   session.page = await session.context.newPage();
   const page = session.page;

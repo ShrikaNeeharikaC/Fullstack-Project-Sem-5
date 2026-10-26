@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { chromium } from "playwright";
+import { chromeArgs } from "../browserArgs.js";
 import { extractFullPageInfo } from "../pageAnalyzer.js";
 import { attachObserver, captureState, describeCall, summarizeDiff } from "./observer.js";
 import { categorizeElements } from "./categorizer.js";
@@ -300,7 +301,7 @@ export async function runSuite(url, opts = {}) {
   const startedAt = new Date().toISOString();
   let llmCalls = 0;
 
-  const browser = await chromium.launch({ channel: "chrome", headless: options.headless });
+  const browser = await chromium.launch({ channel: "chrome", headless: options.headless, args: chromeArgs() });
   try {
     // storageState: the logged-in session from logInForTests, when there is one.
     const context = await browser.newContext({
@@ -474,7 +475,7 @@ const pageKey = (u) => {
 // return the logged-in browser storage and the page the login led to, so
 // every page run starts already logged in. null = no login form, or it failed.
 async function logInForTests(url, options, emit) {
-  const browser = await chromium.launch({ channel: "chrome", headless: options.headless });
+  const browser = await chromium.launch({ channel: "chrome", headless: options.headless, args: chromeArgs() });
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await context.newPage();
