@@ -1,4 +1,4 @@
-import { callGemini } from "../../llm/gemini.js";
+import { generateJSON } from "../../llm/index.js";
 import { check } from "../checks.js";
 
 // Generic checks can see THAT something changed, not whether the result is
@@ -24,7 +24,7 @@ Only answer "incorrect" for a problem you can actually see. If it looks fine or 
 Return ONLY valid JSON matching this schema exactly:
 { "verdict": "correct | incorrect | unsure", "confidence": "number 0-1", "reason": "string, one sentence" }`;
 
-  const { parsed } = await callGemini(prompt, [screenshot]);
+  const { parsed } = await generateJSON(prompt, [screenshot]);
   if (!parsed || !["correct", "incorrect", "unsure"].includes(parsed.verdict)) return null;
   const confidence = Math.max(0, Math.min(1, Number(parsed.confidence) || 0));
   const reason = String(parsed.reason || "").slice(0, 300);

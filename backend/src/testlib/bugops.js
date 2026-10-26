@@ -1,4 +1,4 @@
-import { callGemini } from "../llm/gemini.js";
+import { generateJSON } from "../llm/index.js";
 
 const SEVERITY_RANK = { high: 0, medium: 1, low: 2 };
 
@@ -63,7 +63,7 @@ export function toBugOpsRows(results, { url, templates }) {
 
 // Replaces each template fix hint with an LLM suggestion based on that bug's
 // evidence. One call for all rows; on any failure the template hints stay.
-export async function addLlmFixes(rows, { onLlmCall } = {}) {
+export async function addLlmFixes(rows) {
   if (!rows.length) return { used: false };
   const issues = rows.slice(0, 40).map((r) => ({ id: r.id, title: r.title, page: r.page, element: r.element, rca: r.rca.slice(0, 900) }));
   const prompt = `You are the fix-suggestion step of BugOps, an automated web QA tool.
@@ -80,8 +80,7 @@ Return ONLY valid JSON matching this schema exactly, one entry per issue id:
 { "fixes": [ { "id": "integer (issue id)", "fix": "string" } ] }`;
 
   try {
-    onLlmCall?.();
-    const { parsed } = await callGemini(prompt);
+    const { parsed } = await generateJSON(prompt);
     const fixes = Array.isArray(parsed?.fixes) ? parsed.fixes : [];
     let applied = 0;
     for (const f of fixes) {

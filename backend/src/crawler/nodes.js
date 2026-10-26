@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { interrupt } from "@langchain/langgraph";
-import { analyzePage } from "../llm/gemini.js";
+import { analyzePage } from "../llm/index.js";
 import { extractPageInfo } from "../pageAnalyzer.js";
 import { getCrawlLimits } from "./config.js";
 import { extractCandidates, fingerprint, locateClickable, locateField, normalizeUrl } from "./dom.js";
@@ -9,7 +9,8 @@ import { rankActions, evaluateAction } from "./llm.js";
 import { ensureLoggedIn, findLoginForm, formKey, performLogin } from "./login.js";
 import { isRiskyByKeyword, testValueFor } from "./safety.js";
 import { activeMs, emit, getSession, openBrowser } from "./session.js";
-import { cacheKey, fingerprintInput, getOrComputeAnalysis } from "./scanCache.js";
+import { analyzeCached, canUseLlm, noteLlmError } from "./llmGate.js";
+import { fingerprintInput } from "./scanCache.js";
 
 const limits = getCrawlLimits();
 
@@ -22,53 +23,6 @@ async function screenshot(session, name) {
   const file = path.join(session.dir, `${name}.png`);
   const buffer = await session.page.screenshot({ path: file });
   return { file, buffer };
-}
-
-function canUseLlm(session) {
-  return !session.llmDisabled && session.llmCalls < limits.maxLlmCalls;
-}
-
-async function analyzeCached(session, unit, input, analyze) {
-  if (!session.userId || !session.authSessionId) return analyze();
-  const fingerprintStartedAt = performance.now();
-  const inputHash = fingerprintInput(input);
-  session.cache.fingerprintMs += performance.now() - fingerprintStartedAt;
-  const key = cacheKey({
-    userId: session.userId,
-    sessionId: session.authSessionId,
-    url: session.scanUrl,
-    // promptVersion: bump when a prompt or its reply shape changes, so old
-    // cached replies aren't reused.
-    config: { limits, viewport: "1440x900", model: process.env.GEMINI_MODEL || "gemini-2.5-flash", promptVersion: 2 },
-    unit,
-    input: inputHash,
-  });
-  const { value, hit, fallback } = await getOrComputeAnalysis(key, async () => {
-    session.llmCalls++;
-    return analyze();
-  }, (result) => {
-    if (unit === "landing") return !!result?.parsed;
-    if (unit === "rank") return Array.isArray(result);
-    if (unit === "evaluate") return !!result && typeof result.outcome === "string";
-    return false;
-  });
-  if (hit) {
-    session.cache.hits++;
-    emit(session, "cache_hit", `Reused cached ${unit} analysis`);
-    return value;
-  }
-  session.cache.misses++;
-  if (fallback && process.env.SCAN_CACHE_ENABLED !== "false" && process.env.REDIS_URL) session.cache.errors++;
-  return value;
-}
-
-// After a daily-quota error, stop calling the LLM for the rest of the scan
-// (the crawl continues with rule-based ranking and signal-only bug reports).
-function noteLlmError(session, err) {
-  if (err.code === "QUOTA_EXHAUSTED" && !session.llmDisabled) {
-    session.llmDisabled = true;
-    emit(session, "warning", "LLM quota exhausted: continuing without the LLM for this scan");
-  }
 }
 
 // What the app is, from the landing analysis, so the planner and evaluator

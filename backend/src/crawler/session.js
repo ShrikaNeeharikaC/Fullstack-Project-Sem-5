@@ -3,6 +3,8 @@ import fs from "fs";
 import path from "path";
 import { CRAWL_HEADLESS } from "./config.js";
 import { chromeArgs } from "../browserArgs.js";
+import { EventBus } from "../events/EventBus.js";
+import { LlmUsageCounter, recordHistory } from "../events/subscribers.js";
 
 // The main takeaway
 // The Map is for accessing live objects quickly; LangGraph checkpointing is for saving workflow data so it can resume.
@@ -28,9 +30,10 @@ export function createSession(scanId) {
     page: null,
     // Error signals collected while an action runs (reset before each one).
     signals: [],
-    // Progress log, for the terminal now and the frontend later.
+    // Progress events are published to the bus; subscribers decide where they go
+    // (history below, plus whatever startScan attaches).
+    bus: new EventBus(),
     events: [],
-    onEvent: null,
     // Time accounting: paused time (waiting on the user) is excluded.
     activeMs: 0,
     runningSince: null,
@@ -40,6 +43,9 @@ export function createSession(scanId) {
     userId: null,
     authSessionId: null,
   };
+  recordHistory(session.bus, session.events);
+  // Every LLM call made during this scan counts against its budget.
+  new LlmUsageCounter((count) => (session.llmCalls = count)).attach(session.bus);
   fs.mkdirSync(session.dir, { recursive: true });
   sessions.set(scanId, session);
   return session;
@@ -86,9 +92,7 @@ export async function openBrowser(session) {
 }
 
 export function emit(session, type, message, data = {}) {
-  const event = { at: new Date().toISOString(), type, message, ...data };
-  session.events.push(event);
-  session.onEvent?.(event);
+  session.bus.emit(type, message, data);
 }
 
 export function markRunning(session) {

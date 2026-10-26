@@ -1,4 +1,4 @@
-import { callGemini } from "../llm/gemini.js";
+import { generateJSON } from "../llm/index.js";
 import { isDestructiveByKeyword } from "../crawler/safety.js";
 import { describeElement, hasField, isFileField, isPasswordField, isTextish } from "./elements.js";
 
@@ -123,7 +123,7 @@ export function categorizeByRules(el) {
 
 // Classifies every element. LLM first (one call per page), rules for the rest.
 // The keyword safety check always applies on top of the LLM's own flag.
-export async function categorizeElements({ screenshot, url, title, elements, useLlm, onLlmCall }) {
+export async function categorizeElements({ screenshot, url, title, elements, useLlm }) {
   let llm = new Map();
   let pageType = null;
   let llmError = null;
@@ -131,8 +131,7 @@ export async function categorizeElements({ screenshot, url, title, elements, use
   if (useLlm && elements.length) {
     const forPrompt = elements.slice(0, MAX_ELEMENTS_FOR_LLM).map(describeElement);
     try {
-      onLlmCall?.();
-      const { parsed } = await callGemini(buildPrompt({ url, title, elements: forPrompt }), screenshot ? [screenshot] : []);
+      const { parsed } = await generateJSON(buildPrompt({ url, title, elements: forPrompt }), screenshot ? [screenshot] : []);
       llm = validateCategorization(parsed, new Set(forPrompt.map((e) => e.id)));
       pageType = typeof parsed?.page_type === "string" ? parsed.page_type : null;
       if (!llm.size) llmError = "LLM reply did not match the schema";
