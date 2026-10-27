@@ -39,7 +39,6 @@ export default function Navbar({ active }) {
         >
           <a href="index.html" className={active === "home" ? "active" : undefined}>Home</a>
           <a href="dashboard.html" className={active === "dashboard" ? "active" : undefined}>Dashboard</a>
-          <a href="#about">About Us</a>
         </nav>
         <div className="nav-actions">
           {session ? (

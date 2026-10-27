@@ -10,7 +10,7 @@
     "tests": "node src/runTests.js",
     "test:cache": "node --test src/crawler/scanCache.test.js",
     "claim-scans": "node src/claimScans.js",
-    "test": "node --test src/github/github.test.js src/github/locate.test.js src/crawler/scanCache.test.js",
+    "test": "node --test src/github/github.test.js src/github/locate.test.js src/crawler/scanCache.test.js src/ciScan.test.js",
     "test:github": "node --test src/github/github.test.js src/github/locate.test.js"
   },
   "dependencies": {

@@ -14,13 +14,14 @@ const scans = new Map();
 //   credentials { username, password }            optional: log in without asking
 //   onLogin(credentials)                          optional: called after a successful login
 // Returns the scan record; scan.done resolves with the final report.
-export function startScan(url, { askUser, onEvent, userId, authSessionId, credentials, onLogin } = {}) {
+export function startScan(url, { askUser, onEvent, userId, authSessionId, credentials, onLogin, ciMode = false } = {}) {
   const scanId = `scan-${Date.now()}`;
   const session = createSession(scanId);
   if (onEvent) onProgress(session.bus, onEvent);
   session.userId = userId == null ? null : String(userId);
   session.authSessionId = authSessionId || null;
   session.scanUrl = url;
+  session.ciMode = ciMode;
   // Kept on the live session only: never in graph state, events or reports.
   session.credentials = cleanCredentials(credentials);
   session.onLogin = onLogin || null;

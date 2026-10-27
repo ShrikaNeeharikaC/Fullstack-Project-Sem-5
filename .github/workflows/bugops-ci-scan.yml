@@ -1,0 +1,73 @@
+name: BugOps deployed application scan
+
+on:
+  deployment_status:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    if: github.event_name == 'workflow_dispatch' || github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Validate configuration
+        shell: bash
+        env:
+          BUGOPS_API_URL: ${{ vars.BUGOPS_API_URL }}
+          BUGOPS_TARGET_URL: ${{ vars.BUGOPS_TARGET_URL }}
+          CI_SCAN_API_KEY: ${{ secrets.CI_SCAN_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$BUGOPS_API_URL" || { echo "BUGOPS_API_URL variable is required"; exit 1; }
+          test -n "$BUGOPS_TARGET_URL" || { echo "BUGOPS_TARGET_URL variable is required"; exit 1; }
+          test -n "$CI_SCAN_API_KEY" || { echo "CI_SCAN_API_KEY secret is required"; exit 1; }
+          [[ "$BUGOPS_API_URL" == https://* ]] || { echo "BUGOPS_API_URL must use HTTPS"; exit 1; }
+          [[ "$BUGOPS_TARGET_URL" == https://* ]] || { echo "BUGOPS_TARGET_URL must use HTTPS"; exit 1; }
+
+      - name: Start scan and wait for results
+        shell: bash
+        env:
+          BUGOPS_API_URL: ${{ vars.BUGOPS_API_URL }}
+          BUGOPS_TARGET_URL: ${{ vars.BUGOPS_TARGET_URL }}
+          CI_SCAN_API_KEY: ${{ secrets.CI_SCAN_API_KEY }}
+        run: |
+          set -euo pipefail
+          api="${BUGOPS_API_URL%/}"
+          start_file="$(mktemp)"
+          result_file="$(mktemp)"
+          trap 'rm -f "$start_file" "$result_file"' EXIT
+          curl --silent --show-error --fail-with-body --max-time 30 \
+            -X POST "$api/api/scan" \
+            -H "Authorization: Bearer $CI_SCAN_API_KEY" \
+            -H 'Content-Type: application/json' \
+            --data "$(jq -n --arg target "$BUGOPS_TARGET_URL" '{targetUrl:$target}')" \
+            -o "$start_file"
+          run_id="$(jq -er '.runId | strings | select(length > 0)' "$start_file")"
+          [[ "$run_id" =~ ^scan-[A-Za-z0-9_-]+$ ]] || { echo "Malformed scan run ID"; exit 1; }
+          for attempt in $(seq 1 180); do
+            curl --silent --show-error --fail-with-body --max-time 30 \
+              -H "Authorization: Bearer $CI_SCAN_API_KEY" \
+              "$api/api/scan/$run_id" -o "$result_file"
+            status="$(jq -er '.scanStatus | strings' "$result_file")"
+            case "$status" in
+              completed) break ;;
+              running|incomplete|waiting_for_user) sleep 10 ;;
+              failed) echo "BugOps scan failed"; jq -r '.error // "No error detail"' "$result_file"; exit 1 ;;
+              *) echo "Malformed or unsuccessful scan status: $status"; exit 1 ;;
+            esac
+          done
+          [[ "${status:-}" == completed ]] || { echo "Timed out waiting for BugOps scan"; exit 1; }
+          jq -e '
+            (.runId | strings) and
+            (.totalBugsFound | numbers) and
+            (.newlyDiscoveredHighSeverityBugs | arrays) and
+            (.ciStatus == "pass" or .ciStatus == "fail")
+          ' "$result_file" >/dev/null || { echo "Malformed final scan response"; exit 1; }
+          total="$(jq -r '.totalBugsFound' "$result_file")"
+          new_high="$(jq -r '.newlyDiscoveredHighSeverityBugs | length' "$result_file")"
+          ci_status="$(jq -r '.ciStatus' "$result_file")"
+          echo "BugOps scan $run_id: $status; $total bugs found; $new_high newly discovered high severity; CI $ci_status."
+          [[ "$ci_status" == pass ]] || exit 1

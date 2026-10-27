@@ -5,13 +5,14 @@ import cors from "cors";
 import { analyzePageWorkflow } from "./browser.js";
 import { answerScan, describeScan, getScan, startScan, stopScan } from "./crawler/scanManager.js";
 import { getTestRun, startTestRun } from "./testlib/jobs.js";
-import { bugSources, connectDb, integrations, tickets } from "./db.js";
+import { bugSources, connectDb, integrations, scans, tickets } from "./db.js";
 import { authRouter, requireAuth } from "./auth.js";
 import { findUserBug, listUserScans, recordScanEnd, recordScanStart, userBugops } from "./userScans.js";
 import { githubService } from "./github/service.js";
 import { githubRouter } from "./github/routes.js";
 import { recallCredentials, rememberCredentials } from "./credentialStore.js";
 import { cleanCredentials } from "./crawler/login.js";
+import { ciResult, launchCiScan, matchesCiApiKey } from "./ciScan.js";
 
 const app = express();
 app.use(cors({ origin: process.env.FRONTEND_ORIGIN || "*" }));
@@ -33,6 +34,30 @@ function validateUrl(url) {
 
 // ---- Accounts: signup, login, logout, me. Everything below needs a login.
 app.use("/api/auth", authRouter);
+
+// CI uses a separate API key. Non-CI requests fall through to the existing
+// session authentication middleware below.
+app.post("/api/scan", async (req, res, next) => {
+  const configured = process.env.CI_SCAN_API_KEY;
+  if (!matchesCiApiKey(req.get("authorization"), configured)) return next();
+  const targetUrl = req.body?.targetUrl;
+  try {
+    const scan = await launchCiScan({ targetUrl, startScan, scanCollection: scans() });
+    res.status(202).json({ success: true, runId: scan.scanId, scanStatus: "running", statusUrl: `/api/scan/${scan.scanId}` });
+  } catch (err) {
+    if (err.statusCode === 400) return res.status(400).json({ success: false, error: err.message });
+    console.error("Could not start CI scan:", err.message);
+    res.status(500).json({ success: false, error: "Could not start CI scan" });
+  }
+});
+
+app.get("/api/scan/:id", (req, res, next) => {
+  const scan = getScan(req.params.id);
+  if (!scan?.ci || !matchesCiApiKey(req.get("authorization"), process.env.CI_SCAN_API_KEY)) return next();
+  const summary = scan.ciSummary || ciResult({ runId: scan.scanId, status: scan.status, report: scan.report, baselineReports: scan.baselineReports });
+  res.json({ success: true, ...summary, error: scan.error, events: scan.events });
+});
+
 app.use("/api", requireAuth);
 
 // A scan or test run is only visible to the user who started it.

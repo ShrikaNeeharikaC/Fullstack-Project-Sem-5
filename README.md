@@ -158,6 +158,42 @@ npm start
 
 Open **http://localhost:3000** in your browser.
 
+## CI-triggered deployed application scans
+
+BugOps supports automated scans after an application deployment. The CI API uses a separate backend key and does not replace the normal user session tokens.
+
+### Backend configuration (Render)
+
+In the BugOps backend service on Render, add `CI_SCAN_API_KEY` as a secret environment variable. Generate a long random value (for example, `openssl rand -hex 32`) and use the same value in GitHub Actions. Do not commit the real value or print it in logs. The backend environment example contains only a placeholder. Set the normal `MONGODB_URI` and other backend settings as usual. After saving environment changes, redeploy the backend.
+
+### GitHub Actions configuration
+
+The workflow at `.github/workflows/bugops-ci-scan.yml` runs when GitHub reports a successful `deployment_status`, and it can also be started manually from the Actions tab. This repository does not contain a deployment workflow, so the scan runs from the GitHub deployment completion event rather than assuming that a push deployed the target. A deployment integration must emit GitHub deployment status events for the automatic trigger to run.
+
+In repository **Settings → Secrets and variables → Actions**, add these repository variables:
+
+- `BUGOPS_API_URL`: the public HTTPS URL of the deployed BugOps backend, without `/api` (for example, `https://bugops-api.example.com`).
+- `BUGOPS_TARGET_URL`: the public HTTPS URL of the application to scan.
+
+Add this repository secret:
+
+- `CI_SCAN_API_KEY`: the same random key set on the backend.
+
+The workflow posts `{"targetUrl":"..."}` to `POST /api/scan` using `Authorization: Bearer <CI_SCAN_API_KEY>`, then polls `GET /api/scan/<runId>`. It times out after 30 minutes, fails on transport/auth/response errors or unsuccessful scans, and fails when the completed response reports newly discovered high-severity findings. Its log prints the run ID and bug counts, never the key.
+
+### Baselines and result behavior
+
+CI runs reuse BugOps's Playwright/LangGraph crawler and save reports in the existing scans collection. The baseline consists of up to 20 most recent completed CI or user crawl reports for the same normalized target URL. Findings are compared with a stable SHA-256 fingerprint derived from normalized bug title and affected URL, not database IDs. Previously known high-severity bugs therefore do not fail later runs. With no baseline, every high-severity finding in the first completed scan is new and fails that run; the completed report then becomes a baseline, so an unchanged finding is treated as known on later runs. Medium and low findings are included in `totalBugsFound` but do not fail the pipeline. Failed or incomplete scans always return `ciStatus: "fail"`.
+
+The final response includes `runId`, `scanStatus`, `totalBugsFound`, `newlyDiscoveredHighSeverityBugs`, `baselineExists`, and `ciStatus`. CI-triggered scans skip interactive login prompts; deployments that require authentication should be exposed through a safe, unauthenticated test route or scanned with an appropriately designed test account flow.
+
+### Troubleshooting
+
+- **401 Unauthorized:** confirm the backend secret and GitHub secret match, and that the request uses the Bearer header.
+- **400 target URL rejected:** use a public HTTP(S) URL. Localhost, private, loopback, link-local, internal hostnames, and URLs resolving to any such address are blocked. The crawler checks redirects and requested resources too.
+- **No baseline:** the first scan flags all high-severity findings. Its completed report becomes the baseline for later scans, even when its CI result failed because of new findings.
+- **Timeout or failed scan:** check the GitHub Actions logs and backend logs for availability, MongoDB connectivity, Playwright/Chromium setup, and LLM provider configuration. A failed/incomplete run cannot pass CI.
+
 ---
 
 ##  How It Works
