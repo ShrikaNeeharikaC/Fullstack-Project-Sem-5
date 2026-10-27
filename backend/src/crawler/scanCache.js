@@ -5,6 +5,7 @@ export const SCAN_CACHE_VERSION = "scan-analysis-v1";
 export const FINGERPRINT_VERSION = "page-input-v1";
 
 let client;
+
 let connecting;
 
 const digest = (value) => crypto.createHash("sha256").update(value).digest("hex");

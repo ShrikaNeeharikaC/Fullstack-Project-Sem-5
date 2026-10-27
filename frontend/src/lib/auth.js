@@ -1,6 +1,8 @@
 // Shared by every page: the logged-in session and authenticated API calls.
 
-export const API_BASE = "http://localhost:3000";
+// Vercel sets this at build time to the deployed API origin. Local Docker and
+// Vite development keep using the local Express server by default.
+export const API_BASE = "https://bugops-backend.onrender.com";
 const SESSION_KEY = "bugops-session";
 
 // "Remember me" sessions live in localStorage (survive closing the browser);

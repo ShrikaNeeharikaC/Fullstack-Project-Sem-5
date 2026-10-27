@@ -10,6 +10,13 @@ import { describeElement, elementLabel, elementSignature, extractElements } from
 import { TestContext, settle } from "./context.js";
 import { ALL_TEMPLATES, ELEMENT_TEMPLATES, PAGE_TEMPLATES } from "./templates/index.js";
 import { judgeOutcome } from "./templates/llmJudge.js";
+import { installPublicNetworkGuard } from "../urlSafety.js";
+
+const activeBrowsers = new Set();
+
+export async function shutdownTestBrowsers() {
+  await Promise.all([...activeBrowsers].map((browser) => browser.close().catch(() => {})));
+}
 import { addLlmFixes, toBugOpsRows } from "./bugops.js";
 import { extractCandidates } from "../crawler/dom.js";
 import { findLoginForm, performLogin } from "../crawler/login.js";
@@ -320,13 +327,19 @@ async function runSuiteOnBus(url, opts, bus) {
   const usage = new LlmUsageCounter();
   const detachUsage = usage.attach(bus);
 
+<<<<<<< HEAD
   const browser = await chromium.launch({ channel: "chrome", headless: options.headless, args: chromeArgs() });
+=======
+  const browser = await chromium.launch({ headless: options.headless });
+  activeBrowsers.add(browser);
+>>>>>>> dc149461daf964b130adcb987ac9bd8ea240e9f8
   try {
     // storageState: the logged-in session from logInForTests, when there is one.
     const context = await browser.newContext({
       viewport: { width: 1440, height: 900 },
       ...(options.storageState && { storageState: options.storageState }),
     });
+    await installPublicNetworkGuard(context);
     const page = await context.newPage();
     // Links that open new tabs: the suite stays in one tab. Only pages opened
     // BY a page are closed; tabs a template opens itself are left alone.
@@ -477,6 +490,7 @@ async function runSuiteOnBus(url, opts, bus) {
   } finally {
     detachUsage();
     await browser.close();
+    activeBrowsers.delete(browser);
   }
 }
 
@@ -493,9 +507,15 @@ const pageKey = (u) => {
 // return the logged-in browser storage and the page the login led to, so
 // every page run starts already logged in. null = no login form, or it failed.
 async function logInForTests(url, options, emit) {
+<<<<<<< HEAD
   const browser = await chromium.launch({ channel: "chrome", headless: options.headless, args: chromeArgs() });
+=======
+  const browser = await chromium.launch({ headless: options.headless });
+  activeBrowsers.add(browser);
+>>>>>>> dc149461daf964b130adcb987ac9bd8ea240e9f8
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await installPublicNetworkGuard(context);
     const page = await context.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
     await settle(page);
@@ -514,6 +534,7 @@ async function logInForTests(url, options, emit) {
     return null;
   } finally {
     await browser.close();
+    activeBrowsers.delete(browser);
   }
 }
 

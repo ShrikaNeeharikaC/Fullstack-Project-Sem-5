@@ -2,15 +2,21 @@ import { chromium } from "playwright";
 import { takeScreenshot } from "./screenshot.js";
 import { extractFullPageInfo } from "./pageAnalyzer.js";
 import { attachObserver, captureState } from "./testlib/observer.js";
+<<<<<<< HEAD
 import { analyzePage } from "./llm/index.js";
+=======
+import { analyzePage } from "./llm/gemini.js";
+import { installPublicNetworkGuard } from "./urlSafety.js";
+>>>>>>> dc149461daf964b130adcb987ac9bd8ea240e9f8
 import fs from "fs";
 
 export async function analyzePageWorkflow(url) {
-  const browser = await chromium.launch({ channel: "chrome" });//this will launch the browser in headless mode by default. You can set headless: false if you want to see the browser UI.
+  const browser = await chromium.launch();//launches Playwright's bundled Chromium in headless mode by default.
   try {
     const context = await browser.newContext({
       viewport: { width: 1440, height: 900 },
     });
+    await installPublicNetworkGuard(context);
     const page = await context.newPage();
     // Records network calls, console errors, cookies and storage during the load.
     const observer = await attachObserver(page, { origin: new URL(url).origin });

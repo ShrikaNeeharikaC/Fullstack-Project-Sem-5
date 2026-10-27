@@ -1,7 +1,6 @@
-# React (Vite) build, served as static files by nginx. The pages call the
-# backend directly at http://localhost:3000 (see src/lib/auth.js), so compose
-# publishes the backend on 3000.
-FROM node:20-alpine AS build
+# React (Vite) build, served as static files by nginx. Vite reads VITE_API_URL
+# at build time; src/lib/auth.js uses localhost:3000 as the local fallback.
+FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci

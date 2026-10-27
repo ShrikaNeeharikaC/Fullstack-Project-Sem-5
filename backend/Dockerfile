@@ -8,6 +8,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
+<<<<<<< HEAD
 # The code launches installed Google Chrome (channel: "chrome"), which the
 # image doesn't include. Chrome for Linux is amd64-only. Ubuntu packages are
 # fetched over HTTPS (the image's Azure mirror is HTTP-only): some networks'
@@ -15,6 +16,10 @@ RUN npm ci --omit=dev
 RUN sed -i -e 's|http://azure.archive.ubuntu.com|https://archive.ubuntu.com|g' \
       -e 's|http://\(.*\)ubuntu.com|https://\1ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources \
  && npx playwright install --with-deps chrome
+=======
+# The Playwright base image includes the matching bundled Chromium and its
+# system dependencies. Use that browser to avoid downloading Chrome at build time.
+>>>>>>> dc149461daf964b130adcb987ac9bd8ea240e9f8
 
 COPY src ./src
 

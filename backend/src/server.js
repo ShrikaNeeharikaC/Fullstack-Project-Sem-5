@@ -3,34 +3,73 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { analyzePageWorkflow } from "./browser.js";
-import { answerScan, describeScan, getScan, startScan, stopScan } from "./crawler/scanManager.js";
+import { answerScan, describeScan, getScan, shutdownScans, startScan, stopScan } from "./crawler/scanManager.js";
 import { getTestRun, startTestRun } from "./testlib/jobs.js";
+<<<<<<< HEAD
 import { bugSources, connectDb, integrations, scans, tickets } from "./db.js";
+=======
+import { closeDb, connectDb } from "./db.js";
+>>>>>>> dc149461daf964b130adcb987ac9bd8ea240e9f8
 import { authRouter, requireAuth } from "./auth.js";
 import { findUserBug, listUserScans, recordScanEnd, recordScanStart, userBugops } from "./userScans.js";
 import { githubService } from "./github/service.js";
 import { githubRouter } from "./github/routes.js";
 import { recallCredentials, rememberCredentials } from "./credentialStore.js";
 import { cleanCredentials } from "./crawler/login.js";
+<<<<<<< HEAD
 import { ciResult, launchCiScan, matchesCiApiKey } from "./ciScan.js";
+=======
+import { closeScanCache } from "./crawler/scanCache.js";
+import { shutdownTestBrowsers } from "./testlib/runner.js";
+import { publicHttpUrlError } from "./urlSafety.js";
+>>>>>>> dc149461daf964b130adcb987ac9bd8ea240e9f8
 
 const app = express();
-app.use(cors({ origin: process.env.FRONTEND_ORIGIN || "*" }));
+const defaultOrigins = ["http://localhost:5173", "http://localhost:8080"];
+const allowedOrigins = new Set(
+  (process.env.FRONTEND_ORIGIN || defaultOrigins.join(","))
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+);
+app.use(cors({
+  origin(origin, callback) {
+    callback(null, !origin || allowedOrigins.has(origin));
+  },
+}));
 app.use(express.json());
 
-// Returns an error message if the URL is unusable, otherwise null.
-function validateUrl(url) {
-  if (!url) return "URL is required";
-  try {
-    const parsedUrl = new URL(url);
-    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-      return "Only http and https URLs are allowed";
+app.get("/health", (_req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
+function userRateLimit(limit, windowMs) {
+  const buckets = new Map();
+  return (req, res, next) => {
+    const key = String(req.user._id);
+    const now = Date.now();
+    let bucket = buckets.get(key);
+    if (!bucket || now - bucket.startedAt >= windowMs) {
+      bucket = { startedAt: now, count: 0 };
     }
-  } catch (err) {
-    return "Invalid URL";
-  }
-  return null;
+    if (bucket.count >= limit) {
+      const retrySeconds = Math.max(1, Math.ceil((bucket.startedAt + windowMs - now) / 1000));
+      res.set("Retry-After", String(retrySeconds));
+      return res.status(429).json({ success: false, error: "Too many requests. Please try again later." });
+    }
+    bucket.count++;
+    buckets.set(key, bucket);
+    if (buckets.size > 1000) {
+      for (const [id, value] of buckets) {
+        if (now - value.startedAt >= windowMs) buckets.delete(id);
+      }
+    }
+    next();
+  };
 }
+
+const limitScanStarts = userRateLimit(10, 60 * 60 * 1000);
+const limitAnalyses = userRateLimit(20, 60 * 60 * 1000);
 
 // ---- Accounts: signup, login, logout, me. Everything below needs a login.
 app.use("/api/auth", authRouter);
@@ -63,13 +102,17 @@ app.use("/api", requireAuth);
 // A scan or test run is only visible to the user who started it.
 const ownedBy = (job, req) => job && String(job.userId) === String(req.user._id);
 
+<<<<<<< HEAD
 // ---- GitHub Issues: connect a repository, create an issue for a bug.
 const github = githubService({ integrations, tickets, sources: bugSources, findBug: findUserBug });
 app.use("/api", githubRouter(github));
 
 app.post("/api/analyze", async (req, res) => {
+=======
+app.post("/api/analyze", limitAnalyses, async (req, res) => {
+>>>>>>> dc149461daf964b130adcb987ac9bd8ea240e9f8
   const { url } = req.body;
-  const urlError = validateUrl(url);
+  const urlError = await publicHttpUrlError(url);
   if (urlError) {
     return res.status(400).json({ success: false, error: urlError });
   }
@@ -93,9 +136,9 @@ app.post("/api/analyze", async (req, res) => {
 // Starts a crawl and returns its id immediately.
 // Body: { url, credentials?: { username, password } }. Without credentials the
 // agent asks (via the pending question) when it meets a login form.
-app.post("/api/scan", async (req, res) => {
+app.post("/api/scan", limitScanStarts, async (req, res) => {
   const { url, credentials } = req.body;
-  const urlError = validateUrl(url);
+  const urlError = await publicHttpUrlError(url);
   if (urlError) {
     return res.status(400).json({ success: false, error: urlError });
   }
@@ -150,9 +193,9 @@ app.post("/api/scan/:id/stop", (req, res) => {
 // ---- Reusable test library. Also long-running: start it, then poll.
 
 // Body: { url, allowMutations?, credentials?: { username, password }, maxPages? }
-app.post("/api/tests", async (req, res) => {
+app.post("/api/tests", limitScanStarts, async (req, res) => {
   const { url, allowMutations, credentials, maxPages } = req.body || {};
-  const urlError = validateUrl(url);
+  const urlError = await publicHttpUrlError(url);
   if (urlError) {
     return res.status(400).json({ success: false, error: urlError });
   }
@@ -210,6 +253,26 @@ try {
   console.error("Set MONGODB_URI in backend/.env and make sure MongoDB is running.");
   process.exit(1);
 }
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`Backend listening on port ${port}`);
 });
+
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received; shutting down`);
+  const forceExit = setTimeout(() => process.exit(1), 15_000);
+  forceExit.unref();
+  server.close();
+  await Promise.allSettled([
+    shutdownScans(),
+    shutdownTestBrowsers(),
+  ]);
+  await Promise.allSettled([closeScanCache(), closeDb()]);
+  clearTimeout(forceExit);
+  process.exit(0);
+}
+
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
+process.once("SIGINT", () => void shutdown("SIGINT"));

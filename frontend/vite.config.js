@@ -11,7 +11,7 @@ export default defineConfig({
   server: { port: 5173 },
   build: {
     rollupOptions: {
-      input: Object.fromEntries(pages.map((p) => [p, resolve(__dirname, `${p}.html`)])),
+      input: Object.fromEntries(pages.map((p) => [p, resolve(import.meta.dirname, `${p}.html`)])),
     },
   },
 });

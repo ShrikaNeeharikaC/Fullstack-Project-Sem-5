@@ -2,10 +2,14 @@ import { chromium } from "playwright";
 import fs from "fs";
 import path from "path";
 import { CRAWL_HEADLESS } from "./config.js";
+<<<<<<< HEAD
 import { chromeArgs } from "../browserArgs.js";
 import { EventBus } from "../events/EventBus.js";
 import { LlmUsageCounter, recordHistory } from "../events/subscribers.js";
 import { validatePublicHttpUrl } from "../ciScan.js";
+=======
+import { installPublicNetworkGuard } from "../urlSafety.js";
+>>>>>>> dc149461daf964b130adcb987ac9bd8ea240e9f8
 
 // The main takeaway
 // The Map is for accessing live objects quickly; LangGraph checkpointing is for saving workflow data so it can resume.
@@ -53,6 +57,7 @@ export function createSession(scanId) {
 }
 
 export async function openBrowser(session) {
+<<<<<<< HEAD
   session.browser = await chromium.launch({ channel: "chrome", headless: CRAWL_HEADLESS, args: chromeArgs() });
   session.context = await session.browser.newContext({ viewport: { width: 1440, height: 900 } });
   if (session.ciMode) {
@@ -62,6 +67,11 @@ export async function openBrowser(session) {
       return route.continue();
     });
   }
+=======
+  session.browser = await chromium.launch({ headless: CRAWL_HEADLESS });
+  session.context = await session.browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await installPublicNetworkGuard(session.context);
+>>>>>>> dc149461daf964b130adcb987ac9bd8ea240e9f8
   session.page = await session.context.newPage();
   const page = session.page;
   const push = (signal) => session.signals.push({ ...signal, at: page.url() });
