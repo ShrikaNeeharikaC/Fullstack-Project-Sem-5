@@ -5,6 +5,10 @@ import { MongoClient } from "mongodb";
 //   users     { name, email (unique, lowercase), passwordHash, createdAt }
 //   sessions  { _id: sha256(token), userId, createdAt, expiresAt }   expired ones are deleted by Mongo (TTL)
 //   scans     { userId, kind: "crawl" | "tests", runId, url, targetKey, status, startedAt, finishedAt, error }
+//   integrations { userId, provider: "github", repo, token: <AES-256-GCM box>, connectedAt, updatedAt }
+//   tickets   { userId, bugKey, repo, status: "creating" | "created" | "failed", issueNumber, issueUrl, ... }
+//             one per user + bug + repo (unique), so the same bug never gets two issues
+//   bugSources { userId, bugKey, repo, commit, location, computedAt }   cached likely source location
 
 let client = null;
 let db = null;
@@ -21,6 +25,9 @@ export async function connectDb() {
     db.collection("sessions").createIndex({ userId: 1 }),
     db.collection("scans").createIndex({ runId: 1 }, { unique: true }),
     db.collection("scans").createIndex({ userId: 1, targetKey: 1, finishedAt: -1 }),
+    db.collection("integrations").createIndex({ userId: 1, provider: 1 }, { unique: true }),
+    db.collection("tickets").createIndex({ userId: 1, bugKey: 1, repo: 1 }, { unique: true }),
+    db.collection("bugSources").createIndex({ userId: 1, bugKey: 1, repo: 1, commit: 1 }, { unique: true }),
   ]);
   return db;
 }
@@ -37,3 +44,6 @@ function collection(name) {
 export const users = () => collection("users");
 export const sessions = () => collection("sessions");
 export const scans = () => collection("scans");
+export const integrations = () => collection("integrations");
+export const tickets = () => collection("tickets");
+export const bugSources = () => collection("bugSources");

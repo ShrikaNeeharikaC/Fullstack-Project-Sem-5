@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { takeScreenshot } from "./screenshot.js";
 import { extractFullPageInfo } from "./pageAnalyzer.js";
 import { attachObserver, captureState } from "./testlib/observer.js";
-import { analyzePage } from "./llm/gemini.js";
+import { analyzePage } from "./llm/index.js";
 import fs from "fs";
 
 export async function analyzePageWorkflow(url) {

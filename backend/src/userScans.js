@@ -57,6 +57,30 @@ export async function userBugops(userId, url) {
   });
 }
 
+// One of the user's bug rows by its key, searched only in the user's own runs
+// (the URL's target first when given). Returns null for anyone else's bug.
+// targetUrl is the scanned site the row belongs to (for dashboard links).
+export async function findUserBug(userId, key, url) {
+  if (url) {
+    const data = await userBugops(userId, url);
+    const row = data.rows.find((r) => r.key === key);
+    if (row) return { ...row, targetUrl: data.url };
+  }
+  const done = await scans()
+    .find({ userId, status: "done" }, { projection: { targetKey: 1 } })
+    .sort({ finishedAt: -1 })
+    .limit(200)
+    .toArray();
+  for (const targetKey of [...new Set(done.map((s) => s.targetKey))]) {
+    const { crawl, tests } = await latestRuns(userId, targetKey);
+    if (!crawl && !tests) continue;
+    const data = bugopsFromRuns({ url: (crawl || tests).url, crawlId: crawl?.runId, testsId: tests?.runId });
+    const row = data.rows.find((r) => r.key === key);
+    if (row) return { ...row, targetUrl: data.url };
+  }
+  return null;
+}
+
 // "Recently scanned": one entry per URL the user scanned, newest first.
 export async function listUserScans(userId, limit = 12) {
   const targets = await scans()

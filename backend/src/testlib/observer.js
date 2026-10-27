@@ -102,13 +102,20 @@ export async function attachObserver(page, { origin }) {
   page.on("console", (msg) => {
     const type = msg.type();
     if (type !== "error" && type !== "warning") return;
-    consoleLog.push({ type, text: msg.text().slice(0, 500), source: msg.location()?.url || null });
+    const loc = msg.location();
+    consoleLog.push({
+      type,
+      text: msg.text().slice(0, 500),
+      source: loc?.url || null,
+      // Call site, so a GitHub issue can point at the source line.
+      ...(type === "error" && loc?.url ? { stack: `    at ${loc.url}:${(loc.lineNumber ?? 0) + 1}:${(loc.columnNumber ?? 0) + 1}` } : {}),
+    });
   });
   page.on("pageerror", (err) => {
     consoleLog.push({
       type: "pageerror",
       text: String(err.message || err).slice(0, 500),
-      stack: String(err.stack || "").split("\n").slice(0, 4).join("\n"),
+      stack: String(err.stack || "").split("\n").slice(0, 10).join("\n").slice(0, 2000),
     });
   });
   // alert()/confirm() must never block a test. Dismissed by default; the

@@ -2,6 +2,8 @@ import { Command } from "@langchain/langgraph";
 import { buildCrawlGraph } from "./graph.js";
 import { closeSession, createSession, emit, markPaused, markRunning } from "./session.js";
 import { cleanCredentials } from "./login.js";
+import { runWithBus } from "../events/EventBus.js";
+import { onProgress } from "../events/subscribers.js";
 
 const graph = buildCrawlGraph();
 const scans = new Map();
@@ -15,7 +17,7 @@ const scans = new Map();
 export function startScan(url, { askUser, onEvent, userId, authSessionId, credentials, onLogin } = {}) {
   const scanId = `scan-${Date.now()}`;
   const session = createSession(scanId);
-  session.onEvent = onEvent || null;
+  if (onEvent) onProgress(session.bus, onEvent);
   session.userId = userId == null ? null : String(userId);
   session.authSessionId = authSessionId || null;
   session.scanUrl = url;
@@ -44,7 +46,9 @@ export function startScan(url, { askUser, onEvent, userId, authSessionId, creden
         scan.resolveAnswer = resolve;
       }));
 
-  scan.done = run(scan, ask);
+  // Runs inside the session's bus context so LLM calls made anywhere in the
+  // crawl publish "llm_call" events to this scan.
+  scan.done = runWithBus(session.bus, () => run(scan, ask));
   return scan;
 }
 

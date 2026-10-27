@@ -1,9 +1,11 @@
 import fs from "fs";
 import path from "path";
 import { chromium } from "playwright";
+import { chromeArgs } from "../browserArgs.js";
 import { extractFullPageInfo } from "../pageAnalyzer.js";
 import { attachObserver, captureState, describeCall, summarizeDiff } from "./observer.js";
 import { categorizeElements } from "./categorizer.js";
+import { isLlmConfigured } from "../llm/index.js";
 import { describeElement, elementLabel, elementSignature, extractElements } from "./elements.js";
 import { TestContext, settle } from "./context.js";
 import { ALL_TEMPLATES, ELEMENT_TEMPLATES, PAGE_TEMPLATES } from "./templates/index.js";
@@ -11,6 +13,18 @@ import { judgeOutcome } from "./templates/llmJudge.js";
 import { addLlmFixes, toBugOpsRows } from "./bugops.js";
 import { extractCandidates } from "../crawler/dom.js";
 import { findLoginForm, performLogin } from "../crawler/login.js";
+import { EventBus, currentBus, runWithBus } from "../events/EventBus.js";
+import { LlmUsageCounter, onProgress } from "../events/subscribers.js";
+
+// Runs fn(bus) inside an event bus. A site run opens one bus for all its pages;
+// a page run started on its own opens its own, feeding options.onEvent.
+function withRunBus(options, fn) {
+  const active = currentBus();
+  if (active) return fn(active);
+  const bus = new EventBus();
+  if (options.onEvent) onProgress(bus, options.onEvent);
+  return runWithBus(bus, () => fn(bus));
+}
 
 const SEVERITY_RANK = { high: 0, medium: 1, low: 2 };
 const firstLine = (msg) => String(msg).split("\n")[0].slice(0, 200);
@@ -19,7 +33,7 @@ export function defaultOptions() {
   const user = process.env.TEST_USERNAME;
   const pass = process.env.TEST_PASSWORD;
   return {
-    useLlm: !!process.env.GEMINI_API_KEY,
+    useLlm: isLlmConfigured(),
     headless: process.env.CRAWL_HEADLESS !== "false",
     // Stateful tests (create/delete/cart) write real data: opt-in only.
     allowMutations: process.env.TESTS_ALLOW_MUTATIONS === "true",
@@ -134,6 +148,8 @@ function compactStep(obs) {
     stateChange: summarizeDiff(obs.diff),
     network: obs.network.slice(0, 15).map(describeCall),
     console: obs.console.slice(0, 10).map((c) => `${c.type}: ${c.text}`),
+    // Stack traces / call sites of errors, for locating the source line.
+    stacks: obs.console.filter((c) => c.stack && c.type !== "warning").slice(0, 5).map((c) => `${c.text}\n${c.stack}`),
     blocked: obs.blocked.map(describeCall),
     screenshot: obs.screenshot,
     dom: obs.dom,
@@ -245,7 +261,7 @@ async function discoverElements(t, elements, options) {
 }
 
 // LLM review of passing results from `judge: true` templates.
-async function judgeResults(tests, templates, options, { emit, onLlmCall }) {
+async function judgeResults(tests, templates, options, { emit }) {
   let budget = options.maxJudgeCalls;
   for (const test of tests) {
     if (budget <= 0) break;
@@ -254,7 +270,6 @@ async function judgeResults(tests, templates, options, { emit, onLlmCall }) {
     if (!shot || !fs.existsSync(shot)) continue;
     budget--;
     try {
-      onLlmCall();
       const c = await judgeOutcome(test, fs.readFileSync(shot));
       if (!c) continue;
       test.checks.push(c);
@@ -289,18 +304,23 @@ function summarize(tests) {
 // Runs the whole library on one page:
 //   observe → categorize (LLM) → plan → run templates → BugOps rows.
 // Writes everything to artifacts/tests/<runId>/ and returns the result.
-export async function runSuite(url, opts = {}) {
+export function runSuite(url, opts = {}) {
+  return withRunBus(opts, (bus) => runSuiteOnBus(url, opts, bus));
+}
+
+async function runSuiteOnBus(url, opts, bus) {
   const options = { ...defaultOptions(), ...opts };
-  const onEvent = options.onEvent || (() => {});
-  const emit = (type, message) => onEvent({ at: new Date().toISOString(), type, message });
+  const emit = (type, message) => bus.emit(type, message);
   const runId = options.runId || `tests-${Date.now()}`;
   const dir = path.join("artifacts", "tests", runId);
   fs.mkdirSync(path.join(dir, "dom"), { recursive: true });
   fs.mkdirSync(path.join(dir, "shots"), { recursive: true });
   const startedAt = new Date().toISOString();
-  let llmCalls = 0;
+  // Counts the LLM calls made during this page's run (the LLM client publishes them).
+  const usage = new LlmUsageCounter();
+  const detachUsage = usage.attach(bus);
 
-  const browser = await chromium.launch({ channel: "chrome", headless: options.headless });
+  const browser = await chromium.launch({ channel: "chrome", headless: options.headless, args: chromeArgs() });
   try {
     // storageState: the logged-in session from logInForTests, when there is one.
     const context = await browser.newContext({
@@ -338,7 +358,6 @@ export async function runSuite(url, opts = {}) {
       title,
       elements,
       useLlm: options.useLlm,
-      onLlmCall: () => llmCalls++,
     });
     // A broken key/quota fails every call the same way: stop using the LLM.
     const llmOk = options.useLlm && !(categorized.llmError && !categorized.llmUsed);
@@ -357,7 +376,6 @@ export async function runSuite(url, opts = {}) {
         title,
         elements: discovered,
         useLlm: llmOk,
-        onLlmCall: () => llmCalls++,
       });
       allElements = [...allElements, ...more.elements];
     }
@@ -421,14 +439,14 @@ export async function runSuite(url, opts = {}) {
     const templates = new Map(ALL_TEMPLATES.map((tpl) => [tpl.id, tpl]));
     if (llmOk) {
       emit("judge", "Asking the LLM to review passing results for logic errors");
-      await judgeResults(tests, templates, options, { emit, onLlmCall: () => llmCalls++ });
+      await judgeResults(tests, templates, options, { emit });
     }
 
     // 5. Failed checks → BugOps rows (fix suggestions from the LLM).
     const bugops = toBugOpsRows(tests, { url: finalUrl, templates });
     if (llmOk && bugops.length) {
       emit("fixes", `Asking the LLM for fix suggestions for ${bugops.length} issues`);
-      const fixes = await addLlmFixes(bugops, { onLlmCall: () => llmCalls++ });
+      const fixes = await addLlmFixes(bugops);
       if (fixes.error) emit("warning", `LLM fixes failed: ${firstLine(fixes.error)} (template hints used)`);
     }
 
@@ -443,7 +461,7 @@ export async function runSuite(url, opts = {}) {
       startedAt,
       finishedAt: new Date().toISOString(),
       options: { ...safeOptions, credentials: credentials ? "provided" : null, loggedIn: !!storageState },
-      llm: { categorizer: categorized.llmUsed, calls: llmCalls },
+      llm: { categorizer: categorized.llmUsed, calls: usage.count },
       summary: summarize(tests),
       tests,
       // Same-site links found here, most important first (for site runs).
@@ -457,6 +475,7 @@ export async function runSuite(url, opts = {}) {
     emit("done", `Done: ${result.summary.pass} passed, ${result.summary.fail} failed, ${result.summary.skipped} skipped`);
     return { ...result, dir, bugops };
   } finally {
+    detachUsage();
     await browser.close();
   }
 }
@@ -474,7 +493,7 @@ const pageKey = (u) => {
 // return the logged-in browser storage and the page the login led to, so
 // every page run starts already logged in. null = no login form, or it failed.
 async function logInForTests(url, options, emit) {
-  const browser = await chromium.launch({ channel: "chrome", headless: options.headless });
+  const browser = await chromium.launch({ channel: "chrome", headless: options.headless, args: chromeArgs() });
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await context.newPage();
@@ -503,9 +522,13 @@ async function logInForTests(url, options, emit) {
 // With a test account the pages behind the login are tested, and the login
 // page itself gets the last slot (tested logged out, for the login tests).
 // Writes one combined bugops.json so the dashboard shows the whole site.
-export async function runSite(url, opts = {}) {
+export function runSite(url, opts = {}) {
+  return withRunBus(opts, (bus) => runSiteOnBus(url, opts, bus));
+}
+
+async function runSiteOnBus(url, opts, bus) {
   const options = { ...defaultOptions(), ...opts };
-  const emit = (type, message) => options.onEvent?.({ at: new Date().toISOString(), type, message });
+  const emit = (type, message) => bus.emit(type, message);
   const auth = options.credentials ? await logInForTests(url, options, emit) : null;
   const startUrl = auth?.url || url;
   const pageOpts = auth ? { ...opts, storageState: auth.storageState } : opts;

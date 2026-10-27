@@ -738,7 +738,7 @@ table.bug-table {
   transition: max-height 0.25s ease, padding 0.25s ease;
 }
 .expand-detail-inner.open {
-  max-height: 300px;
+  max-height: 900px;
   padding: 16px 4px 22px;
 }
 .expand-detail-inner h5 {
@@ -749,6 +749,55 @@ table.bug-table {
   margin-bottom: 6px;
 }
 .expand-detail-inner p { font-size: 0.87rem; line-height: 1.55; }
+
+/* GitHub issue button in a bug's expanded details */
+.ticket-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--lavender-border);
+}
+.ticket-bar .btn[aria-busy="true"] { cursor: progress; }
+.ticket-note { font-size: 0.8rem; color: var(--text-muted); }
+.ticket-error { font-size: 0.8rem; font-weight: 600; color: var(--severity-high); flex-basis: 100%; }
+.ticket-link { color: var(--purple-deep); font-weight: 600; }
+
+/* Screenshot + likely source location in a bug's expanded details */
+.bug-evidence {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 14px;
+}
+.bug-evidence p { margin-bottom: 6px; overflow-wrap: anywhere; }
+.evidence-shot img {
+  display: block;
+  width: 100%;
+  max-height: 240px;
+  object-fit: cover;
+  object-position: top;
+  border: 1px solid var(--lavender-border);
+  border-radius: var(--radius-sm);
+}
+.evidence-muted { color: var(--text-muted); font-size: 0.8rem !important; }
+.bug-evidence code { font-size: 0.8rem; background: var(--lavender-card); padding: 1px 5px; border-radius: 4px; }
+.confidence {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--lavender-card);
+  color: var(--text-navy);
+}
+.confidence.high { background: rgba(47, 174, 115, 0.16); color: #1e7a50; }
+.confidence.medium { background: rgba(242, 153, 74, 0.18); color: #9a5a1c; }
+@media (max-width: 760px) {
+  .bug-evidence { grid-template-columns: 1fr; }
+}
 
 /* Empty state */
 .empty-state {
@@ -826,6 +875,24 @@ table.bug-table {
 }
 .settings-row .label { font-weight: 600; color: var(--text-navy); font-size: 0.9rem; }
 .settings-row .hint { font-size: 0.78rem; color: var(--text-muted); }
+
+/* Settings → GitHub Issues */
+.github-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--white);
+  border: 1px solid var(--lavender-border);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+}
+.github-settings .label { font-weight: 600; color: var(--text-navy); font-size: 0.9rem; }
+.github-settings .hint { font-size: 0.78rem; color: var(--text-muted); line-height: 1.5; }
+.github-settings .hint a { color: var(--purple-deep); font-weight: 600; }
+.github-actions { display: flex; gap: 10px; }
+.github-settings .field-error { font-size: 0.78rem; color: var(--severity-high); font-weight: 600; min-height: 1.1em; }
+.checkbox-row { display: flex; gap: 10px; align-items: flex-start; font-size: 0.82rem; color: var(--text-body); line-height: 1.45; }
+.checkbox-row input { margin-top: 3px; }
 .switch {
   position: relative;
   width: 42px; height: 24px;

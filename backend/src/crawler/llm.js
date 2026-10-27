@@ -1,4 +1,4 @@
-import { callGemini } from "../llm/gemini.js";
+import { generateJSON } from "../llm/index.js";
 
 // Asks the LLM to rank this screen's candidate actions by testing value, and
 // to work out this app's own logic: what each action should do if the app
@@ -53,7 +53,7 @@ Return ONLY valid JSON matching this schema exactly, with one entry per candidat
   ]
 }`;
 
-  const { parsed } = await callGemini(prompt, [screenshot]);
+  const { parsed } = await generateJSON(prompt, [screenshot]);
   return Array.isArray(parsed?.ranked) ? parsed.ranked : null;
 }
 
@@ -118,7 +118,7 @@ Return ONLY valid JSON matching this schema exactly:
   ]
 }`;
 
-  const { parsed } = await callGemini(prompt, images);
+  const { parsed } = await generateJSON(prompt, images);
   if (!parsed || typeof parsed.outcome !== "string") return null;
   return { ...parsed, bugs: Array.isArray(parsed.bugs) ? parsed.bugs : [] };
 }

@@ -2,6 +2,9 @@ import { chromium } from "playwright";
 import fs from "fs";
 import path from "path";
 import { CRAWL_HEADLESS } from "./config.js";
+import { chromeArgs } from "../browserArgs.js";
+import { EventBus } from "../events/EventBus.js";
+import { LlmUsageCounter, recordHistory } from "../events/subscribers.js";
 
 // The main takeaway
 // The Map is for accessing live objects quickly; LangGraph checkpointing is for saving workflow data so it can resume.
@@ -27,9 +30,10 @@ export function createSession(scanId) {
     page: null,
     // Error signals collected while an action runs (reset before each one).
     signals: [],
-    // Progress log, for the terminal now and the frontend later.
+    // Progress events are published to the bus; subscribers decide where they go
+    // (history below, plus whatever startScan attaches).
+    bus: new EventBus(),
     events: [],
-    onEvent: null,
     // Time accounting: paused time (waiting on the user) is excluded.
     activeMs: 0,
     runningSince: null,
@@ -39,22 +43,39 @@ export function createSession(scanId) {
     userId: null,
     authSessionId: null,
   };
+  recordHistory(session.bus, session.events);
+  // Every LLM call made during this scan counts against its budget.
+  new LlmUsageCounter((count) => (session.llmCalls = count)).attach(session.bus);
   fs.mkdirSync(session.dir, { recursive: true });
   sessions.set(scanId, session);
   return session;
 }
 
 export async function openBrowser(session) {
-  session.browser = await chromium.launch({ channel: "chrome", headless: CRAWL_HEADLESS });
+  session.browser = await chromium.launch({ channel: "chrome", headless: CRAWL_HEADLESS, args: chromeArgs() });
   session.context = await session.browser.newContext({ viewport: { width: 1440, height: 900 } });
   session.page = await session.context.newPage();
   const page = session.page;
   const push = (signal) => session.signals.push({ ...signal, at: page.url() });
 
+  // Where an error came from (stack trace / console call site) is kept so a
+  // GitHub issue can point at the source line.
   page.on("console", (msg) => {
-    if (msg.type() === "error") push({ type: "console_error", message: msg.text().slice(0, 500) });
+    if (msg.type() !== "error") return;
+    const loc = msg.location();
+    push({
+      type: "console_error",
+      message: msg.text().slice(0, 500),
+      ...(loc?.url ? { stack: `    at ${loc.url}:${(loc.lineNumber ?? 0) + 1}:${(loc.columnNumber ?? 0) + 1}` } : {}),
+    });
   });
-  page.on("pageerror", (err) => push({ type: "js_exception", message: String(err.message || err).slice(0, 500) }));
+  page.on("pageerror", (err) =>
+    push({
+      type: "js_exception",
+      message: String(err.message || err).slice(0, 500),
+      stack: String(err.stack || "").split("\n").slice(0, 10).join("\n").slice(0, 2000),
+    }),
+  );
   page.on("response", (res) => {
     if (res.status() >= 400) {
       push({
@@ -85,9 +106,7 @@ export async function openBrowser(session) {
 }
 
 export function emit(session, type, message, data = {}) {
-  const event = { at: new Date().toISOString(), type, message, ...data };
-  session.events.push(event);
-  session.onEvent?.(event);
+  session.bus.emit(type, message, data);
 }
 
 export function markRunning(session) {
