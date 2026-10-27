@@ -9,8 +9,12 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 # The code launches installed Google Chrome (channel: "chrome"), which the
-# image doesn't include. Chrome for Linux is amd64-only.
-RUN npx playwright install --with-deps chrome
+# image doesn't include. Chrome for Linux is amd64-only. Ubuntu packages are
+# fetched over HTTPS (the image's Azure mirror is HTTP-only): some networks'
+# proxies corrupt plain-HTTP apt downloads ("Hash Sum mismatch").
+RUN sed -i -e 's|http://azure.archive.ubuntu.com|https://archive.ubuntu.com|g' \
+      -e 's|http://\(.*\)ubuntu.com|https://\1ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources \
+ && npx playwright install --with-deps chrome
 
 COPY src ./src
 

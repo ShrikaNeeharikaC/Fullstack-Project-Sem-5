@@ -9,7 +9,9 @@
     "crawl": "node src/crawl.js",
     "tests": "node src/runTests.js",
     "test:cache": "node --test src/crawler/scanCache.test.js",
-    "claim-scans": "node src/claimScans.js"
+    "claim-scans": "node src/claimScans.js",
+    "test": "node --test src/github/github.test.js src/github/locate.test.js src/crawler/scanCache.test.js",
+    "test:github": "node --test src/github/github.test.js src/github/locate.test.js"
   },
   "dependencies": {
     "@langchain/core": "^1.2.17",

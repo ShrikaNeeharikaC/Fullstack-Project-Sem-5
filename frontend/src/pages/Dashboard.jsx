@@ -5,6 +5,16 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import Navbar from "../components/Navbar.jsx";
 import { apiFetch } from "../lib/auth.js";
 import { displayUrl, relativeTime } from "../lib/format.js";
+import {
+  REPO_FORMAT,
+  confidenceLabel,
+  connectGithub,
+  createIssue,
+  disconnectGithub,
+  fetchScreenshotUrl,
+  fetchSource,
+  ticketView,
+} from "../lib/github.js";
 import { mount } from "../lib/mount.jsx";
 
 const PAGE_SIZE = 5;
@@ -90,6 +100,196 @@ function SeverityBadge({ sev }) {
   );
 }
 
+// Screenshot and likely source location of one bug, loaded when its details open.
+function BugEvidence({ bug, trackedUrl, github }) {
+  const [shot, setShot] = useState({ loading: true, url: null, error: null });
+  const [source, setSource] = useState({ loading: false, data: null, error: null });
+
+  useEffect(() => {
+    let objectUrl = null;
+    let alive = true;
+    fetchScreenshotUrl(apiFetch, bug, trackedUrl)
+      .then((url) => {
+        objectUrl = url;
+        if (alive) setShot({ loading: false, url, error: null });
+        else if (url) URL.revokeObjectURL(url);
+      })
+      .catch((err) => alive && setShot({ loading: false, url: null, error: err.message }));
+    return () => {
+      alive = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [bug.key, trackedUrl]);
+
+  useEffect(() => {
+    if (!github.connected) return;
+    let alive = true;
+    setSource({ loading: true, data: null, error: null });
+    fetchSource(apiFetch, bug, trackedUrl)
+      .then((data) => alive && setSource({ loading: false, data, error: null }))
+      .catch((err) => alive && setSource({ loading: false, data: null, error: err.message }));
+    return () => {
+      alive = false;
+    };
+  }, [bug.key, trackedUrl, github.connected, github.repo, github.ref]);
+
+  const loc = source.data?.location;
+  return (
+    <div className="bug-evidence">
+      <div className="evidence-shot">
+        <h5>Screenshot</h5>
+        {shot.loading ? (
+          <p className="evidence-muted">Loading…</p>
+        ) : shot.url ? (
+          <a href={shot.url} target="_blank" rel="noopener noreferrer" title="Open full size">
+            <img src={shot.url} alt={`Screenshot when "${bug.title}" happened`} />
+          </a>
+        ) : (
+          <p className="evidence-muted">{shot.error || "No screenshot was recorded for this bug."}</p>
+        )}
+      </div>
+      <div className="evidence-source">
+        <h5>Likely source location</h5>
+        {!github.connected ? (
+          <p className="evidence-muted">Connect a GitHub repository in Settings to locate this bug in the code.</p>
+        ) : source.loading ? (
+          <p className="evidence-muted">Searching {github.repo}…</p>
+        ) : source.error ? (
+          <p className="ticket-error">{source.error}</p>
+        ) : loc && loc.status !== "unidentified" ? (
+          <>
+            <p>
+              <a className="ticket-link" href={loc.sourceCodeUrl} target="_blank" rel="noopener noreferrer">
+                {loc.sourceFile}:{loc.sourceLine}
+              </a>
+              {loc.sourceFunction && <> &middot; <code>{loc.sourceFunction}</code></>}
+            </p>
+            <p><span className={`confidence ${loc.sourceConfidence}`}>{confidenceLabel(loc)}</span></p>
+            <p className="evidence-muted">{loc.sourceReason}</p>
+          </>
+        ) : (
+          <p className="evidence-muted">Not identified. {loc?.sourceReason}</p>
+        )}
+        {loc?.commit && <p className="evidence-muted">Code version: <code>{loc.commit.slice(0, 7)}</code>{loc.ref ? ` (${loc.ref})` : ""}</p>}
+      </div>
+    </div>
+  );
+}
+
+// Create / View GitHub issue for one bug, shown in its expanded details.
+function TicketControl({ bug, github, state, onCreate, onConnect }) {
+  const v = ticketView({ connected: github.connected, ticket: bug.ticket, pending: state?.pending, error: state?.error });
+  return (
+    <div className="ticket-bar">
+      {v.kind === "view" ? (
+        <a className="btn btn-dark btn-sm" href={v.href} target="_blank" rel="noopener noreferrer">{v.label}</a>
+      ) : (
+        <button className="btn btn-dark btn-sm" disabled={v.disabled} aria-busy={v.kind === "creating"}
+          onClick={() => (v.kind === "connect" ? onConnect() : onCreate(bug))}>{v.label}</button>
+      )}
+      <span className="ticket-note">
+        {v.kind === "view" && <>Issue created in {bug.ticket.repo}</>}
+        {(v.kind === "create" || v.kind === "creating") && !v.message && <>Creates an issue in {github.repo}</>}
+        {v.kind === "connect" && <>Connect a repository to send bugs to GitHub Issues.</>}
+      </span>
+      {v.message && <span className="ticket-error" role="alert">{v.message}</span>}
+    </div>
+  );
+}
+
+// Settings → GitHub: connect, update or disconnect the user's repository.
+function GithubSettings({ github, onChange, showToast }) {
+  const [repo, setRepo] = useState(github.repo || "");
+  const [token, setToken] = useState("");
+  const [ref, setRef] = useState(github.ref || "");
+  const [upload, setUpload] = useState(!!github.uploadScreenshots);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setRepo(github.repo || "");
+    setRef(github.ref || "");
+    setUpload(!!github.uploadScreenshots);
+  }, [github.repo, github.ref, github.uploadScreenshots]);
+
+  const save = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (!REPO_FORMAT.test(repo.trim())) return setError("Enter the repository as owner/repo, e.g. octocat/hello-world.");
+    if (!github.connected && !token.trim()) return setError("Paste a GitHub personal access token.");
+    setBusy(true);
+    try {
+      const data = await connectGithub(apiFetch, { repo: repo.trim(), token: token.trim(), ref: ref.trim(), uploadScreenshots: upload });
+      setToken("");
+      onChange(data);
+      showToast(`Connected to ${data.repo}`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disconnect = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await disconnectGithub(apiFetch);
+      setToken("");
+      onChange({ connected: false, repo: null });
+      showToast("GitHub disconnected");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form className="github-settings" id="github-settings" onSubmit={save}>
+      <div className="label">GitHub Issues</div>
+      <div className="hint">
+        {github.connected ? <>Connected to <strong>{github.repo}</strong>.</> : "Send bugs to a GitHub repository as issues."}{" "}
+        Use a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">fine-grained token</a> with
+        access to only that repository and <strong>Issues: Read and write</strong>. Add <strong>Contents: Read</strong> to locate bugs
+        in the code, or <strong>Contents: Read and write</strong> to also embed screenshots. It is stored encrypted and never shown again.
+      </div>
+      <div className="form-group">
+        <label htmlFor="github-repo">Repository</label>
+        <input id="github-repo" placeholder="owner/repo" value={repo} autoComplete="off" spellCheck="false"
+          onChange={(e) => setRepo(e.target.value)} />
+      </div>
+      <div className="form-group">
+        <label htmlFor="github-token">Personal access token</label>
+        <input id="github-token" type="password" autoComplete="off" value={token}
+          placeholder={github.connected ? "Leave empty to keep the saved token" : "github_pat_…"}
+          onChange={(e) => setToken(e.target.value)} />
+      </div>
+      <div className="form-group">
+        <label htmlFor="github-ref">Deployed branch or commit (optional)</label>
+        <input id="github-ref" placeholder={github.defaultBranch ? `Default: ${github.defaultBranch} (latest commit)` : "e.g. main or a commit SHA"}
+          value={ref} autoComplete="off" spellCheck="false" onChange={(e) => setRef(e.target.value)} />
+      </div>
+      <label className="checkbox-row">
+        <input type="checkbox" checked={upload} onChange={(e) => setUpload(e.target.checked)} />
+        <span>
+          Embed screenshots in issues. They are uploaded to a separate <code>bugops-screenshots</code> branch of the repository.
+          {github.repoPrivate === false && <strong className="ticket-error"> This repository is public: screenshots will be public.</strong>}
+        </span>
+      </label>
+      <span className="field-error" role="alert">{error}</span>
+      <div className="github-actions">
+        <button className="btn btn-dark btn-sm" type="submit" disabled={busy}>
+          {busy ? "Checking…" : github.connected ? "Update" : "Connect repository"}
+        </button>
+        {github.connected && (
+          <button className="btn btn-outline btn-sm" type="button" disabled={busy} onClick={disconnect}>Disconnect</button>
+        )}
+      </div>
+    </form>
+  );
+}
+
 function StatsStrip({ bugs }) {
   const count = (sev) => bugs.filter((b) => b.severity === sev && b.status !== "resolved").length;
   return (
@@ -123,6 +323,8 @@ function Dashboard() {
   const [automationLogs, setAutomationLogs] = useState([]);
   const [settings, setSettings] = useState(() => Object.fromEntries(SETTINGS.map((s) => [s.key, s.on])));
   const [rescanning, setRescanning] = useState(false);
+  const [github, setGithub] = useState({ connected: false, repo: null });
+  const [ticketState, setTicketState] = useState({}); // { [bugKey]: { pending, error } }
 
   const [toast, setToast] = useState({ text: "", visible: false });
   const toastTimer = useRef(null);
@@ -151,6 +353,8 @@ function Dashboard() {
       }));
       setTrackedUrl(tracked);
       setLastScannedAt(data.lastScanned);
+      setGithub(data.github?.connected ? data.github : { connected: false, repo: null });
+      setTicketState({});
       setBugs(rows);
       setPage(1);
       setExpanded({});
@@ -283,6 +487,32 @@ function Dashboard() {
     tableWrapRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   };
 
+  // Creates (or reuses) the GitHub issue for a bug. One request at a time per bug.
+  const createTicketFor = async (bug) => {
+    if (ticketState[bug.key]?.pending) return;
+    setTicketState((s) => ({ ...s, [bug.key]: { pending: true, error: null } }));
+    try {
+      const data = await createIssue(apiFetch, bug, trackedUrl);
+      const ticket = { status: data.status, repo: data.repo, issueNumber: data.issueNumber, issueUrl: data.issueUrl };
+      setBugs((list) => list.map((b) => (b.key === bug.key ? { ...b, ticket } : b)));
+      setTicketState((s) => ({ ...s, [bug.key]: { pending: false, error: null } }));
+      showToast(data.warning || `${data.reused ? "Issue already exists" : "Issue created"}: #${data.issueNumber}`);
+    } catch (err) {
+      setTicketState((s) => ({ ...s, [bug.key]: { pending: false, error: err.message } }));
+    }
+  };
+
+  const goToGithubSettings = () => {
+    setView("settings");
+    setTimeout(() => document.getElementById("github-repo")?.focus(), 0);
+  };
+
+  // Issues belong to a repository, so the rows' issue links change with it.
+  const onGithubChange = (next) => {
+    setGithub(next);
+    if (trackedUrl) loadBugs(trackedUrl);
+  };
+
   const openModal = (bug) => setModal({ bug, visible: true });
   const closeModal = () => setModal((m) => ({ ...m, visible: false }));
 
@@ -389,7 +619,12 @@ function Dashboard() {
                               </div>
                               <div>
                                 <div className="bug-title">{bug.title}</div>
-                                <div className="bug-meta">{bug.page} &middot; {bug.detectedLabel}</div>
+                                <div className="bug-meta">
+                                  {bug.page} &middot; {bug.detectedLabel}
+                                  {bug.ticket?.status === "created" && bug.ticket.issueUrl && (
+                                    <> &middot; <a className="ticket-link" href={bug.ticket.issueUrl} target="_blank" rel="noopener noreferrer">Issue #{bug.ticket.issueNumber}</a></>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </td>
@@ -420,6 +655,13 @@ function Dashboard() {
                             <div className={`expand-detail-inner${expandedType ? " open" : ""}`}>
                               {expandedType === "rca" && <><h5>Root Cause Analysis</h5><p>{bug.rca}</p></>}
                               {expandedType === "fix" && <><h5>Suggested Fix</h5><p>{bug.fix}</p></>}
+                              {expandedType && (
+                                <>
+                                  <BugEvidence bug={bug} trackedUrl={trackedUrl} github={github} />
+                                  <TicketControl bug={bug} github={github} state={ticketState[bug.key]}
+                                    onCreate={createTicketFor} onConnect={goToGithubSettings} />
+                                </>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -509,6 +751,7 @@ function Dashboard() {
                       onClick={() => setSettings((st) => ({ ...st, [s.key]: !st[s.key] }))}></button>
                   </div>
                 ))}
+                <GithubSettings github={github} onChange={onGithubChange} showToast={showToast} />
               </div>
             </div>
           </section>

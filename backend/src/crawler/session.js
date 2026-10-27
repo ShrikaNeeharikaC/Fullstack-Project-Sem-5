@@ -58,10 +58,24 @@ export async function openBrowser(session) {
   const page = session.page;
   const push = (signal) => session.signals.push({ ...signal, at: page.url() });
 
+  // Where an error came from (stack trace / console call site) is kept so a
+  // GitHub issue can point at the source line.
   page.on("console", (msg) => {
-    if (msg.type() === "error") push({ type: "console_error", message: msg.text().slice(0, 500) });
+    if (msg.type() !== "error") return;
+    const loc = msg.location();
+    push({
+      type: "console_error",
+      message: msg.text().slice(0, 500),
+      ...(loc?.url ? { stack: `    at ${loc.url}:${(loc.lineNumber ?? 0) + 1}:${(loc.columnNumber ?? 0) + 1}` } : {}),
+    });
   });
-  page.on("pageerror", (err) => push({ type: "js_exception", message: String(err.message || err).slice(0, 500) }));
+  page.on("pageerror", (err) =>
+    push({
+      type: "js_exception",
+      message: String(err.message || err).slice(0, 500),
+      stack: String(err.stack || "").split("\n").slice(0, 10).join("\n").slice(0, 2000),
+    }),
+  );
   page.on("response", (res) => {
     if (res.status() >= 400) {
       push({

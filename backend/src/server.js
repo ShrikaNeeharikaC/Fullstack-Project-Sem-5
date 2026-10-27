@@ -5,9 +5,11 @@ import cors from "cors";
 import { analyzePageWorkflow } from "./browser.js";
 import { answerScan, describeScan, getScan, startScan, stopScan } from "./crawler/scanManager.js";
 import { getTestRun, startTestRun } from "./testlib/jobs.js";
-import { connectDb } from "./db.js";
+import { bugSources, connectDb, integrations, tickets } from "./db.js";
 import { authRouter, requireAuth } from "./auth.js";
-import { listUserScans, recordScanEnd, recordScanStart, userBugops } from "./userScans.js";
+import { findUserBug, listUserScans, recordScanEnd, recordScanStart, userBugops } from "./userScans.js";
+import { githubService } from "./github/service.js";
+import { githubRouter } from "./github/routes.js";
 import { recallCredentials, rememberCredentials } from "./credentialStore.js";
 import { cleanCredentials } from "./crawler/login.js";
 
@@ -35,6 +37,10 @@ app.use("/api", requireAuth);
 
 // A scan or test run is only visible to the user who started it.
 const ownedBy = (job, req) => job && String(job.userId) === String(req.user._id);
+
+// ---- GitHub Issues: connect a repository, create an issue for a bug.
+const github = githubService({ integrations, tickets, sources: bugSources, findBug: findUserBug });
+app.use("/api", githubRouter(github));
 
 app.post("/api/analyze", async (req, res) => {
   const { url } = req.body;
@@ -149,8 +155,15 @@ app.get("/api/tests/:id", (req, res) => {
 
 // Dashboard rows for ?url= (or the user's most recent scan): the user's latest
 // crawl (Scan page) and latest test run (Re-Scan) for it, merged.
+// Each row carries its GitHub issue (for the connected repository), if any.
 app.get("/api/bugops", async (req, res) => {
-  res.json({ success: true, ...(await userBugops(req.user._id, req.query.url)) });
+  const data = await userBugops(req.user._id, req.query.url);
+  const [conn, ticketMap] = await Promise.all([
+    github.getConnection(req.user._id),
+    github.ticketsFor(req.user._id, data.rows.map((r) => r.key)),
+  ]);
+  for (const row of data.rows) row.ticket = ticketMap[row.key] || null;
+  res.json({ success: true, ...data, github: conn });
 });
 
 // The user's scanned URLs, most recent first ("Recently scanned").

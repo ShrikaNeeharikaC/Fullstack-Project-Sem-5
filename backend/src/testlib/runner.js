@@ -148,6 +148,8 @@ function compactStep(obs) {
     stateChange: summarizeDiff(obs.diff),
     network: obs.network.slice(0, 15).map(describeCall),
     console: obs.console.slice(0, 10).map((c) => `${c.type}: ${c.text}`),
+    // Stack traces / call sites of errors, for locating the source line.
+    stacks: obs.console.filter((c) => c.stack && c.type !== "warning").slice(0, 5).map((c) => `${c.text}\n${c.stack}`),
     blocked: obs.blocked.map(describeCall),
     screenshot: obs.screenshot,
     dom: obs.dom,

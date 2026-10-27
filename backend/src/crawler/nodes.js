@@ -585,17 +585,19 @@ export async function evaluateNode(state) {
   if ((suspicious || logicCheck) && canUseLlm(session) && result.screenshot) {
     try {
       const beforeFile = state.states[action.sourceStateId]?.screenshot;
+      // Stack traces are kept for the report only, not sent to the LLM.
+      const llmResult = { ...result, signals: result.signals.map(({ stack: _stack, ...s }) => s) };
       const evalInput = {
         screenshot: fs.readFileSync(result.screenshot),
         beforeScreenshot: beforeFile && fs.existsSync(beforeFile) ? fs.readFileSync(beforeFile) : null,
         action: { label: action.label, kind: action.kind, href: action.target.href || null, expect: action.expect || "" },
-        result,
+        result: llmResult,
         site: siteContext(state),
       };
       const verdict = await analyzeCached(session, "evaluate", {
         action: evalInput.action,
         site: evalInput.site,
-        result: { ...result, screenshot: undefined },
+        result: { ...llmResult, screenshot: undefined },
         screenshot: fingerprintInput(evalInput.screenshot),
         beforeScreenshot: evalInput.beforeScreenshot ? fingerprintInput(evalInput.beforeScreenshot) : null,
       }, () => evaluateAction(evalInput));
