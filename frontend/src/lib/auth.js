@@ -1,6 +1,7 @@
 // Shared by every page: the logged-in session and authenticated API calls.
 
-export const API_BASE = "http://localhost:3000";
+// Set VITE_API_BASE at build time (Vercel env var) to the deployed backend URL.
+export const API_BASE = (import.meta.env.VITE_API_BASE || "http://localhost:3000").replace(/\/+$/, "");
 const SESSION_KEY = "bugops-session";
 
 // "Remember me" sessions live in localStorage (survive closing the browser);
